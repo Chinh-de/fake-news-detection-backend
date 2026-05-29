@@ -1,0 +1,31 @@
+[project]
+name = "fake-news-backend"
+version = "0.1.0"
+description = "FastAPI backend for Fake News Detection system"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.22.0",
+    "sqlalchemy>=2.0.0",
+    "asyncpg>=0.28.0",
+    "psycopg2-binary>=2.9.6",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "openai>=1.0.0",
+    "torch>=2.0.0",
+    "transformers>=4.40.0",
+    "sentence-transformers>=2.2.2",
+    "rank-bm25>=0.2.2",
+    "wikipedia>=1.4.0",
+    "beautifulsoup4>=4.12.0",
+    "curl-cffi>=0.5.9",
+    "ddgs",
+    "pandas>=2.0.0",
+    "duckdb>=0.9.0",
+    "python-multipart>=0.0.6",
+    "pyvi>=0.1.1",
+    "pyjwt>=2.8.0",
+    "passlib[bcrypt]>=1.7.4",
+    "google-genai>=0.1.1",
+]
