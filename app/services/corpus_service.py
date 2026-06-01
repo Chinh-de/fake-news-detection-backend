@@ -40,26 +40,10 @@ class CorpusService:
             # Load CSV using pandas
             df = pd.read_csv(csv_path)
             
-            # Select required columns
-            # Columns in train.csv: id,label,label_id,timestamp,year,month,day,year_month,source_dataset,text
             records_to_insert = []
             
             for _, row in df.iterrows():
-                # Parse timestamp
-                ts_val = None
-                if 'timestamp' in row and pd.notna(row['timestamp']):
-                    try:
-                        ts_val = datetime.strptime(str(row['timestamp']).strip(), "%Y-%m-%d %H:%M:%S")
-                    except Exception:
-                        try:
-                            ts_val = datetime.strptime(str(row['timestamp']).strip(), "%Y-%m-%d")
-                        except Exception:
-                            pass
-                
-                text_val = str(row['text']) if pd.notna(row['text']) else ""
-                label_val = str(row['label']) if pd.notna(row['label']) else ""
-                label_id_val = int(row['label_id']) if pd.notna(row['label_id']) else None
-                source_dataset_val = str(row['source_dataset']) if pd.notna(row['source_dataset']) else None
+                text_val = str(row['text']) if ('text' in row and pd.notna(row['text'])) else ""
                 
                 if not text_val.strip():
                     continue
@@ -67,10 +51,7 @@ class CorpusService:
                 records_to_insert.append(
                     NewsCorpus(
                         text=text_val,
-                        label=label_val,
-                        label_id=label_id_val,
-                        timestamp=ts_val,
-                        source_dataset=source_dataset_val
+                        source_dataset="news_corpus"
                     )
                 )
                 

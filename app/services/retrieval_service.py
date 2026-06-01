@@ -84,7 +84,7 @@ class RetrievalService:
         """Search local news corpus using pg_trgm similarity."""
         # Using pg_trgm distance operator <->
         stmt = text("""
-            SELECT text, label_id, source_dataset 
+            SELECT text, source_dataset 
             FROM news_corpus 
             ORDER BY text <-> :query_text 
             LIMIT :limit
@@ -95,8 +95,7 @@ class RetrievalService:
             return [
                 {
                     "text": row[0],
-                    "label_id": row[1],
-                    "source": row[2] or "DB/Corpus"
+                    "source": row[1] or "DB/Corpus"
                 }
                 for row in rows
             ]
@@ -124,7 +123,6 @@ class RetrievalService:
             if cleaned_body:
                 news_items.append({
                     "text": f"{title}\n{cleaned_body}",
-                    "label_id": random.choice([0, 1]),
                     "source": url or "Internet/DDG"
                 })
         return news_items

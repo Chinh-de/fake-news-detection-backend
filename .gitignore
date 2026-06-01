@@ -1,3 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Env
+.env
+env/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Model artifacts and large binaries
+model/downloads/
+model/*.safetensors
+model/*.pt
+
+# Hugging Face workspace mirror
+hf_space/
 # Python cache and bytecode
 __pycache__/
 *.py[cod]

@@ -3,6 +3,9 @@ from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKEND_DIR = os.path.dirname(BASE_DIR)
+
 class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = Field(default="postgresql+asyncpg://postgres:postgrespassword@localhost:5432/fake_news_detection")
@@ -16,12 +19,12 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = Field(default="")
 
     # SLM
-    SLM_MODEL_PATH: str = Field(default="d:\\Study_space\\Ki8\\PBL7\\cuoi ki\\PBL\\Fake-news-detection\\Backend\\model")
+    SLM_MODEL_PATH: str = Field(default=os.path.join(BACKEND_DIR, "model"))
     SLM_REPO_ID: str = Field(default="chinhde/fake-news-detection-slm")
     HF_TOKEN: str = Field(default="")
 
     # Embedding Model
-    EMBEDDING_MODEL_CACHE_DIR: str = Field(default="d:\\Study_space\\Ki8\\PBL7\\cuoi ki\\PBL\\Fake-news-detection\\Backend\\model\\embeddings")
+    EMBEDDING_MODEL_CACHE_DIR: str = Field(default=os.path.join(BACKEND_DIR, "model", "embeddings"))
 
     # CORS
     CORS_ORIGINS: str = Field(default="http://localhost:3000,http://localhost:5173,chrome-extension://*")
@@ -32,13 +35,13 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = Field(default="adminpassword")
 
     # Seeding
-    SEED_CORPUS_CSV: str = Field(default="d:\\Study_space\\Ki8\\PBL7\\cuoi ki\\PBL\\dataset\\train.csv")
+    SEED_CORPUS_CSV: str = Field(default=os.path.join(BASE_DIR, "seed_data", "vifactcheck_all.csv"))
     # Logging
     ENABLE_ANALYSIS_LOG: bool = Field(default=False)
     LOG_LEVEL: str = Field(default="INFO")
 
     model_config = SettingsConfigDict(
-        env_file=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
+        env_file=os.path.join(BACKEND_DIR, ".env"),
         env_file_encoding="utf-8",
         extra="ignore"
     )
