@@ -1,12 +1,15 @@
 import os
 from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, model_validator
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.dirname(BASE_DIR)
 
 class Settings(BaseSettings):
+    # Production Mode
+    PRODUCTION: bool = Field(default=False)
+
     # Database
     DATABASE_URL: str = Field(default="postgresql+asyncpg://postgres:postgrespassword@localhost:5432/fake_news_detection")
     DATABASE_SYNC_URL: str = Field(default="postgresql://postgres:postgrespassword@localhost:5432/fake_news_detection")
@@ -39,6 +42,21 @@ class Settings(BaseSettings):
     # Logging
     ENABLE_ANALYSIS_LOG: bool = Field(default=False)
     LOG_LEVEL: str = Field(default="INFO")
+
+    @model_validator(mode="after")
+    def configure_production_paths(self) -> "Settings":
+        is_prod = self.PRODUCTION or os.environ.get("production", "").lower() == "true" or os.environ.get("PRODUCTION", "").lower() == "true"
+        if is_prod:
+            self.PRODUCTION = True
+            # Override paths to /tmp in production to avoid permission denied errors in environments like HF Spaces
+            self.SLM_MODEL_PATH = "/tmp/model"
+            self.EMBEDDING_MODEL_CACHE_DIR = "/tmp/model/embeddings"
+            
+            # Set HF and Torch cache directories to /tmp to prevent Permission Denied errors
+            os.environ["HF_HOME"] = "/tmp/hf_cache"
+            os.environ["TRANSFORMERS_CACHE"] = "/tmp/hf_cache/transformers"
+            os.environ["TORCH_HOME"] = "/tmp/torch_cache"
+        return self
 
     model_config = SettingsConfigDict(
         env_file=os.path.join(BACKEND_DIR, ".env"),
