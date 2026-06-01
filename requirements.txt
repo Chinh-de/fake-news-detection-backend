@@ -15,9 +15,10 @@ wikipedia>=1.4.0
 beautifulsoup4>=4.12.0
 curl-cffi>=0.5.9
 ddgs
+huggingface_hub>=0.23.0
 pandas>=2.0.0
 duckdb>=0.9.0
 python-multipart>=0.0.6
-jose>=1.0.0
+pyjwt>=2.8.0
 passlib[bcrypt]>=1.7.4
 google-genai>=0.1.1
