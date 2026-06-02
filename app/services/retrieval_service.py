@@ -176,6 +176,7 @@ class RetrievalService:
         news_items = []
         results_gen = ddgs.news(
             query=query,
+            region="vn-vi",
             safesearch="off",
             timelimit=None,
             max_results=max_results,
@@ -200,6 +201,7 @@ class RetrievalService:
         results = []
         results_gen = ddgs.text(
             query,
+            region="vn-vi",
             backend=backend,
             max_results=max_results
         )
@@ -216,23 +218,27 @@ class RetrievalService:
             })
         return results
 
-    def search_internet_news(self, query: str, max_results: int = 10, max_retries: int = 3) -> list[dict]:
+    async def search_internet_news(self, query: str, max_results: int = 10, max_retries: int = 3) -> list[dict]:
         """Tìm kiếm tin tức internet, chỉ dùng backend='bing', thử lại tối đa max_retries lần."""
         logger.debug("Internet news search: query=%s max_results=%d", query, max_results)
         last_exception = None
+        loop = asyncio.get_event_loop()
         for attempt in range(1, max_retries + 1):
             try:
-                with DDGS(timeout=20) as ddgs:
-                    news_items = self._search_ddgs_news_with_backend(ddgs, query, max_results)
-                    if news_items:
-                        logger.info("Internet news success on attempt %d: %d items", attempt, len(news_items))
-                        return news_items
-                    logger.warning("Internet news attempt %d returned empty results", attempt)
+                def _do_search():
+                    with DDGS(timeout=20) as ddgs:
+                        return self._search_ddgs_news_with_backend(ddgs, query, max_results)
+                
+                news_items = await loop.run_in_executor(None, _do_search)
+                if news_items:
+                    logger.info("Internet news success on attempt %d: %d items", attempt, len(news_items))
+                    return news_items
+                logger.warning("Internet news attempt %d returned empty results", attempt)
             except Exception as e:
                 last_exception = e
                 logger.warning("Internet news attempt %d failed: %s", attempt, e)
                 if attempt < max_retries:
-                    time.sleep(0.5)
+                    await asyncio.sleep(0.5)
 
         logger.error("Internet news failed after %d attempts. Last error: %s", max_retries, last_exception)
         return []
@@ -248,11 +254,7 @@ class RetrievalService:
         logger.info("Fewshot local corpus candidates=%d", len(db_candidates))
         
         # 2. Search internet news
-        import asyncio
-        loop = asyncio.get_event_loop()
-        internet_candidates = await loop.run_in_executor(
-            None, self.search_internet_news, search_query, 10
-        )
+        internet_candidates = await self.search_internet_news(search_query, 10)
         logger.info("Fewshot internet candidates=%d", len(internet_candidates))
         
         candidates = db_candidates + internet_candidates
@@ -303,7 +305,7 @@ class RetrievalService:
             
         return fewshots
 
-    def search_trusted_articles(self, query: str, max_urls: int = 5) -> list[dict]:
+    async def search_trusted_articles(self, query: str, max_urls: int = 5) -> list[dict]:
         """Tìm kiếm trusted domains, thử xen kẽ yahoo -> bing -> yahoo -> bing."""
         site_filter = " OR ".join([f"site:{d}" for d in TRUST_DOMAINS])
         full_query = f"{query} ({site_filter})".strip()
@@ -311,24 +313,28 @@ class RetrievalService:
 
         backends = ["bing", "yahoo"]
         max_attempts = 2
+        loop = asyncio.get_event_loop()
 
         for attempt in range(1, max_attempts + 1):
-            with DDGS(timeout=20) as ddgs:
-                for backend in backends:
-                    try:
-                        results = self._search_ddgs_text_with_backend(ddgs, full_query, max_urls, backend)
-                        if results:
-                            logger.info(
-                                "Trusted search SUCCESS with backend=%s (attempt %d): %d results",
-                                backend,
-                                attempt,
-                                len(results),
-                            )
-                            return results
-                        logger.warning("Trusted search backend=%s attempt %d returned empty", backend, attempt)
-                    except Exception as e:
-                        logger.error("Trusted search backend=%s attempt %d failed: %s", backend, attempt, e)
-                    time.sleep(0.5)
+            for backend in backends:
+                try:
+                    def _do_search():
+                        with DDGS(timeout=20) as ddgs:
+                            return self._search_ddgs_text_with_backend(ddgs, full_query, max_urls, backend)
+                    
+                    results = await loop.run_in_executor(None, _do_search)
+                    if results:
+                        logger.info(
+                            "Trusted search SUCCESS with backend=%s (attempt %d): %d results",
+                            backend,
+                            attempt,
+                            len(results),
+                        )
+                        return results
+                    logger.warning("Trusted search backend=%s attempt %d returned empty", backend, attempt)
+                except Exception as e:
+                    logger.error("Trusted search backend=%s attempt %d failed: %s", backend, attempt, e)
+                await asyncio.sleep(0.5)
 
         logger.info("Trusted search returned no results for query=%s", query)
         return []
@@ -443,20 +449,32 @@ class RetrievalService:
         # Filter out very short chunks
         return [c.strip() for c in chunks if len(c.strip()) > 30]
 
+    def is_trusted_url(self, url: str) -> bool:
+        """Check if a URL belongs to one of the trusted domains."""
+        if not url:
+            return False
+        url_lower = url.strip().lower()
+        domain = re.sub(r'^https?://(www\.)?', '', url_lower)
+        host = domain.split('/')[0].split('?')[0].split(':')[0]
+        for d in TRUST_DOMAINS:
+            if host == d or host.endswith("." + d):
+                return True
+        return False
+
     async def retrieve_rag_evidence(self, query_text: str, post_normalized_text: str) -> list[dict]:
         """
         Search trusted sites using both LLM query and clean sliced input query in parallel,
         scrape articles, chunk them, embed them, and perform semantic search.
         """
+        loop = asyncio.get_event_loop()
         # Clean input query: slice to max 300 chars
         cleaned_input_query = post_normalized_text[:300].strip()
         
         logger.info("Running parallel trusted search. Query 1 (LLM): '%s', Query 2 (Clean Input): '%s'", query_text, cleaned_input_query)
         
-        # Run both searches in parallel using executor to prevent blocking
-        loop = asyncio.get_event_loop()
-        task1 = loop.run_in_executor(None, self.search_trusted_articles, query_text, 5)
-        task2 = loop.run_in_executor(None, self.search_trusted_articles, cleaned_input_query, 5)
+        # Run both searches in parallel
+        task1 = self.search_trusted_articles(query_text, 5)
+        task2 = self.search_trusted_articles(cleaned_input_query, 5)
         
         results1, results2 = await asyncio.gather(task1, task2)
         
@@ -466,6 +484,9 @@ class RetrievalService:
         for r in (results1 + results2):
             url = r.get("url")
             if url:
+                if not self.is_trusted_url(url):
+                    logger.warning("RAG search returned untrusted domain URL: %s, filtering out", url)
+                    continue
                 # Normalize URL for deduplication check
                 norm_url = url.strip().lower()
                 norm_url = re.sub(r'^https?://(www\.)?', '', norm_url)
