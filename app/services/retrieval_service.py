@@ -220,7 +220,7 @@ class RetrievalService:
 
     async def search_internet_news(self, query: str, max_results: int = 10, max_retries: int = 3) -> list[dict]:
         """Tìm kiếm tin tức internet, chỉ dùng backend='bing', thử lại tối đa max_retries lần."""
-        logger.debug("Internet news search: query=%s max_results=%d", query, max_results)
+        logger.warning("Internet news search: query=%s, using backend='bing' (attempting up to %d times)", query, max_retries)
         last_exception = None
         loop = asyncio.get_event_loop()
         for attempt in range(1, max_retries + 1):
@@ -231,7 +231,9 @@ class RetrievalService:
                 
                 news_items = await loop.run_in_executor(None, _do_search)
                 if news_items:
-                    logger.info("Internet news success on attempt %d: %d items", attempt, len(news_items))
+                    logger.warning("Internet news success on attempt %d: %d items", attempt, len(news_items))
+                    for idx, item in enumerate(news_items, 1):
+                        logger.warning("Internet news result #%d: source=%s, text_preview=%s", idx, item.get("source"), item.get("text", "")[:120].replace('\n', ' ') + "...")
                     return news_items
                 logger.warning("Internet news attempt %d returned empty results", attempt)
             except Exception as e:
@@ -318,6 +320,7 @@ class RetrievalService:
         for attempt in range(1, max_attempts + 1):
             for backend in backends:
                 try:
+                    logger.warning("Initiating trusted search using backend='%s' (attempt %d/%d) with query: %s", backend, attempt, max_attempts, full_query)
                     def _do_search():
                         with DDGS(timeout=20) as ddgs:
                             return self._search_ddgs_text_with_backend(ddgs, full_query, max_urls, backend)
@@ -330,6 +333,8 @@ class RetrievalService:
                             attempt,
                             len(results),
                         )
+                        for idx, r in enumerate(results, 1):
+                            logger.warning("Trusted search result #%d: title=%s, url=%s, snippet=%s", idx, r.get("title"), r.get("url"), r.get("snippet", "")[:120].replace('\n', ' ') + "...")
                         return results
                     logger.warning("Trusted search backend=%s attempt %d returned empty", backend, attempt)
                 except Exception as e:
