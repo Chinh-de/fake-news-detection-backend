@@ -460,6 +460,15 @@ class RetrievalService:
             if host == d or host.endswith("." + d):
                 return True
         return False
+    def is_valid_article_url(url: str) -> bool:
+        # Loại bỏ file sitemap, file ảnh, hoặc các trang định dạng xml
+        if url.lower().endswith(('.xml', '.png', '.jpg', '.jpeg', '.gif')):
+            return False
+        # Loại bỏ các trang sitemap của vnexpress
+        if "sitemap" in url.lower():
+            return False
+        return True
+
 
     async def retrieve_rag_evidence(self, query_text: str, post_normalized_text: str) -> list[dict]:
         """
@@ -487,6 +496,10 @@ class RetrievalService:
                 if not self.is_trusted_url(url):
                     logger.warning("RAG search returned untrusted domain URL: %s, filtering out", url)
                     continue
+                if not self.is_valid_article_url(url):
+                    logger.warning("RAG search returned non-article URL: %s, filtering out", url)
+                    continue
+
                 # Normalize URL for deduplication check
                 norm_url = url.strip().lower()
                 norm_url = re.sub(r'^https?://(www\.)?', '', norm_url)
