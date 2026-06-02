@@ -127,3 +127,35 @@ async def get_history_detail(
         final_prompt=record.final_prompt,
         created_at=record.created_at
     )
+
+
+@router.delete("/{record_id}", status_code=status.HTTP_200_OK)
+async def delete_history_record(
+    record_id: int,
+    current_user: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Xóa một bản ghi lịch sử dự đoán theo ID.
+    Yêu cầu quyền Admin.
+    """
+    stmt = select(PredictionRecord).where(PredictionRecord.id == record_id)
+    res = await db.execute(stmt)
+    record = res.scalars().first()
+    
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Không tìm thấy bản ghi lịch sử với ID {record_id}"
+        )
+        
+    try:
+        await db.delete(record)
+        await db.commit()
+        return {"message": f"Đã xóa thành công bản ghi {record_id}"}
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Lỗi khi xóa bản ghi: {str(e)}"
+        )

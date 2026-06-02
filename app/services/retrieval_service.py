@@ -363,90 +363,159 @@ class RetrievalService:
             logger.debug("Failed scraping URL=%s", url)
             return ""
 
-    def chunk_text(self, text_str: str, chunk_size: int = 800, overlap: int = 150) -> list[str]:
+    def chunk_text(self, text_str: str, chunk_size: int = 1000, overlap: int = 150) -> list[str]:
         """
-        Chunk article text: length approx 800 chars, cut at nearest sentence boundary,
-        with 150 chars overlap. Fallback hard split if no boundary in ±50 chars.
+        Chunk article text: length approx chunk_size (default 1000) chars,
+        prioritizing keeping whole sentences, with overlap (default 150) chars.
+        Ensure overlap is done at sentence boundaries (no chopped sentences/words).
         """
         if not text_str:
             return []
 
         # Split into sentences using simple regex that keeps sentence-ending punctuation
-        sentences = re.split(r'(?<=[\.\!\?…])\s+', text_str)
-
-        # Accumulate sentences into chunks without breaking sentences
-        temp_chunks = []
-        current = ''
-        for s in sentences:
+        raw_sentences = re.split(r'(?<=[\.\!\?…])\s+', text_str)
+        sentences = []
+        for s in raw_sentences:
             s = s.strip()
             if not s:
                 continue
-            if not current:
-                current = s
-            elif len(current) + 1 + len(s) <= chunk_size:
-                current = current + ' ' + s
+            # If a single sentence is extremely long, we split it by words to avoid issues
+            if len(s) > chunk_size:
+                words = s.split()
+                curr_words = []
+                curr_len = 0
+                for w in words:
+                    if curr_words and curr_len + 1 + len(w) > chunk_size - overlap:
+                        sentences.append(" ".join(curr_words))
+                        curr_words = [w]
+                        curr_len = len(w)
+                    else:
+                        curr_words.append(w)
+                        curr_len += len(w) + (1 if curr_len > 0 else 0)
+                if curr_words:
+                    sentences.append(" ".join(curr_words))
             else:
-                temp_chunks.append(current.strip())
-                current = s
-        if current:
-            temp_chunks.append(current.strip())
+                sentences.append(s)
 
-        # Apply overlap by prefixing each chunk (except first) with the last `overlap` chars
-        final_chunks = []
-        for i, c in enumerate(temp_chunks):
-            if i == 0:
-                final_chunks.append(c)
+        if not sentences:
+            return []
+
+        chunks = []
+        current_sentences = []
+        current_length = 0
+
+        for s in sentences:
+            s_len = len(s)
+            # If adding this sentence exceeds chunk_size
+            if current_sentences and current_length + 1 + s_len > chunk_size:
+                # Add current chunk
+                chunks.append(" ".join(current_sentences))
+                
+                # Calculate overlap sentences
+                overlap_sentences = []
+                overlap_len = 0
+                for os in reversed(current_sentences):
+                    # We want to stop if we exceed overlap
+                    if overlap_len >= overlap:
+                        break
+                    # Also avoid carrying over the entire chunk
+                    if len(overlap_sentences) == len(current_sentences) - 1:
+                        break
+                    overlap_sentences.append(os)
+                    overlap_len += len(os) + (1 if overlap_len > 0 else 0)
+                
+                overlap_sentences.reverse()
+                current_sentences = list(overlap_sentences)
+                current_length = sum(len(os) for os in current_sentences) + len(current_sentences) - 1
+                if current_length < 0:
+                    current_length = 0
+
+            if current_sentences:
+                current_sentences.append(s)
+                current_length += 1 + s_len
             else:
-                prev = final_chunks[-1]
-                prefix = prev[-overlap:] if len(prev) > overlap else prev
-                # Ensure we don't exceed reasonable length too much; truncate prefix if needed
-                candidate = (prefix + ' ' + c).strip()
-                final_chunks.append(candidate)
+                current_sentences.append(s)
+                current_length = s_len
+
+        if current_sentences:
+            chunks.append(" ".join(current_sentences))
 
         # Filter out very short chunks
-        return [c for c in final_chunks if len(c.strip()) > 30]
+        return [c.strip() for c in chunks if len(c.strip()) > 30]
 
     async def retrieve_rag_evidence(self, query_text: str, post_normalized_text: str) -> list[dict]:
         """
-        Search trusted sites, scrape articles, chunk them, embed them,
-        and perform semantic search with query = normalized post text to get top 4 chunks.
+        Search trusted sites using both LLM query and clean sliced input query in parallel,
+        scrape articles, chunk them, embed them, and perform semantic search.
         """
-        # 1. Search trusted sites
-        logger.debug("retrieve_rag_evidence query=%s", query_text)
-        results = self.search_trusted_articles(query_text, max_urls=5)
-        logger.info("RAG trusted search results=%d", len(results))
+        # Clean input query: slice to max 300 chars
+        cleaned_input_query = post_normalized_text[:300].strip()
+        
+        logger.info("Running parallel trusted search. Query 1 (LLM): '%s', Query 2 (Clean Input): '%s'", query_text, cleaned_input_query)
+        
+        # Run both searches in parallel using executor to prevent blocking
+        loop = asyncio.get_event_loop()
+        task1 = loop.run_in_executor(None, self.search_trusted_articles, query_text, 5)
+        task2 = loop.run_in_executor(None, self.search_trusted_articles, cleaned_input_query, 5)
+        
+        results1, results2 = await asyncio.gather(task1, task2)
+        
+        # Combine and deduplicate by URL
+        results = []
+        seen_urls = set()
+        for r in (results1 + results2):
+            url = r.get("url")
+            if url:
+                # Normalize URL for deduplication check
+                norm_url = url.strip().lower()
+                norm_url = re.sub(r'^https?://(www\.)?', '', norm_url)
+                norm_url = norm_url.rstrip('/')
+                if '?' in norm_url:
+                    base, query = norm_url.split('?', 1)
+                    params = [p for p in query.split('&') if not p.startswith('utm_')]
+                    if params:
+                        norm_url = base + '?' + '&'.join(params)
+                    else:
+                        norm_url = base
+                
+                if norm_url not in seen_urls:
+                    seen_urls.add(norm_url)
+                    results.append(r)
+                
+        logger.info("RAG trusted search combined results=%d (LLM=%d, Clean Input=%d)", len(results), len(results1), len(results2))
         if not results:
             return []
-            
-        # 2. Scrape and chunk articles in parallel or sequentially
-        import asyncio
-        loop = asyncio.get_event_loop()
-        
-        def _scrape_and_chunk():
-            all_chunks = []
-            for r in results:
-                scraped_text = self.scrape_article_text(r["url"])
-                # Fallback to snippet if scraping fails or is too short
-                if not scraped_text or len(scraped_text.split()) < 30:
-                    scraped_text = r.get("snippet", "")
-                if not scraped_text:
-                    continue
-                # Clean scraped text before chunking to normalize whitespace, remove noise
-                scraped_text = clean_text_transformer(scraped_text)
-                if not scraped_text:
-                    continue
 
-                chunks = self.chunk_text(scraped_text)
-                for chunk in chunks:
-                    all_chunks.append({
-                        "chunk_text": chunk,
-                        "title": r["title"],
-                        "url": r["url"],
-                        "source": "trusted_internet"
-                    })
-            return all_chunks
+        # Scrape all articles in parallel using the default thread pool executor
+        scrape_tasks = [
+            loop.run_in_executor(None, self.scrape_article_text, r["url"])
+            for r in results
+        ]
+        scraped_texts = await asyncio.gather(*scrape_tasks)
+
+        # Process results (CPU-bound: cleaning & chunking) sequentially
+        chunks = []
+        for r, scraped_text in zip(results, scraped_texts):
+            # Fallback to snippet if scraping fails or is too short
+            if not scraped_text or len(scraped_text.split()) < 30:
+                scraped_text = r.get("snippet", "")
+            if not scraped_text:
+                continue
             
-        chunks = await loop.run_in_executor(None, _scrape_and_chunk)
+            # Clean text
+            cleaned_text = clean_text_transformer(scraped_text)
+            if not cleaned_text:
+                continue
+
+            # Limit to first 15 chunks (~15,000 characters) per article to prevent noise/comments blowing up embedding time
+            article_chunks = self.chunk_text(cleaned_text)[:15]
+            for chunk in article_chunks:
+                chunks.append({
+                    "chunk_text": chunk,
+                    "title": r["title"],
+                    "url": r["url"],
+                    "source": "trusted_internet"
+                })
         logger.info("RAG scraped chunks=%d", len(chunks))
         if not chunks:
             return []
