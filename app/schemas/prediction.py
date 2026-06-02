@@ -18,6 +18,7 @@ class AnalyzeRequest(BaseModel):
     text: str = Field(..., description="Nội dung bài viết cần phân tích")
     fb_post_id: Optional[str] = Field(None, description="ID bài viết trên Facebook (nếu có)")
     fb_post_created_at: Optional[datetime] = Field(None, description="Thời gian đăng bài viết (nếu có)")
+    record_id: Optional[int] = Field(None, description="ID bản ghi đã tạo từ bước dự đoán nhanh (nếu có)")
 
 class ChunkEvidence(BaseModel):
     score: float

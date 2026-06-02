@@ -92,11 +92,11 @@ class PredictionService:
         return record
 
     async def run_deep_analysis(
-        self, db: AsyncSession, text_input: str, fb_post_id: str = None, fb_post_created_at: datetime = None
+        self, db: AsyncSession, text_input: str, fb_post_id: str = None, fb_post_created_at: datetime = None, record_id: int = None
     ) -> PredictionRecord:
         """
         Logic for POST /api/analyze:
-        Check if fb_post_id already exists.
+        Check if record_id or fb_post_id already exists.
         If yes -> rerun SLM, update DB, but KEEP original LLM result from DB, and return.
         If no -> run full pipeline (SLM + RAG + LLM), save new record to DB, and return.
         """
@@ -107,7 +107,12 @@ class PredictionService:
         logger.debug("SLM prediction=%s confidence=%s", slm_label, slm_confidence)
         
         record = None
-        if fb_post_id:
+        if record_id:
+            stmt = select(PredictionRecord).where(PredictionRecord.id == record_id)
+            res = await db.execute(stmt)
+            record = res.scalars().first()
+
+        if not record and fb_post_id:
             stmt = select(PredictionRecord).where(PredictionRecord.fb_post_id == fb_post_id)
             res = await db.execute(stmt)
             record = res.scalars().first()

@@ -460,16 +460,15 @@ class RetrievalService:
             if host == d or host.endswith("." + d):
                 return True
         return False
-    
     def is_valid_article_url(self, url: str) -> bool:
-        # Loại bỏ các domain lạ từ Google Support/Zhihu
-        forbidden_keywords = ["sitemap", "xml", "support.google.com", "zhihu.com"]
-        
-        if any(keyword in url.lower() for keyword in forbidden_keywords):
+        # Loại bỏ file sitemap, file ảnh, hoặc các trang định dạng xml
+        if url.lower().endswith(('.xml', '.png', '.jpg', '.jpeg', '.gif')):
             return False
-            
-        # Chỉ chấp nhận các trang có đuôi html hoặc có cấu trúc path dài (bài báo)
-        return url.lower().endswith('.html') or len(url.split('/')) > 4
+        # Loại bỏ các trang sitemap của vnexpress
+        if "sitemap" in url.lower():
+            return False
+        return True
+
 
     async def retrieve_rag_evidence(self, query_text: str, post_normalized_text: str) -> list[dict]:
         """

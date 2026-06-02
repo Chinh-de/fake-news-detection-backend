@@ -20,7 +20,8 @@ async def analyze_news(request: AnalyzeRequest, db: AsyncSession = Depends(get_d
             db=db,
             text_input=request.text,
             fb_post_id=request.fb_post_id,
-            fb_post_created_at=request.fb_post_created_at
+            fb_post_created_at=request.fb_post_created_at,
+            record_id=request.record_id
         )
         
         # Format the RAG evidence chunks and few-shot examples to match the response schema
