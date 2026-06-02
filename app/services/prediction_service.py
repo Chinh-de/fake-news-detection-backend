@@ -138,8 +138,8 @@ class PredictionService:
         # Log the entity extraction prompts when analysis logging enabled
         try:
             if settings.ENABLE_ANALYSIS_LOG:
-                logger.info("Entity extraction system prompt:\n%s", entity_sys_prompt)
-                logger.info("Entity extraction user prompt:\n%s", entity_user_prompt)
+                logger.debug("Entity extraction system prompt:\n%s", entity_sys_prompt)
+                logger.debug("Entity extraction user prompt:\n%s", entity_user_prompt)
         except Exception:
             pass
 
@@ -154,12 +154,12 @@ class PredictionService:
         if match:
             clean_resp = match.group(0)
         
-        logger.info("Raw entity extraction response:\n%s", raw_entities)
+        logger.debug("Raw entity extraction response:\n%s", raw_entities)
 
         data = json.loads(clean_resp)
         entities = data.get("entities", [])
         search_query = data.get("query", search_query)
-        logger.info("Extracted entities=%s search_query=%s", entities, search_query)
+        logger.debug("Extracted entities=%s search_query=%s", entities, search_query)
 
         # Also save/log raw extraction response when enabled
         try:

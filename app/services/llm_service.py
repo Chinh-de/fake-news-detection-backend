@@ -145,7 +145,7 @@ class LLMService:
                     config=config,
                     contents=contents
                 )
-                logger.info("GenAI response details: %s", response)
+                logger.debug("GenAI response details: %s", response)
                 if response.text is None:
                     err_msg = "Google GenAI trả về phản hồi rỗng (None)."
                     try:
