@@ -1,24 +1,33 @@
-import ssl # <--- 1. Import thêm thư viện ssl chuẩn của Python
+import os
+import ssl 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import declarative_base
 from app.config import settings
 
-# 2. Khởi tạo cấu hình SSL context cho thư viện asyncpg
-# Cách này giúp bỏ qua việc cấu hình chuỗi mã hóa phức tạp trên DATABASE_URL
-ssl_context = ssl.create_default_context()
-ssl_context.check_hostname = False
-ssl_context.verify_mode = ssl.CERT_NONE
+DATABASE_URL = settings.DATABASE_URL
+
+# 1. Tự động nhận diện môi trường: Kiểm tra xem URL có trỏ về máy local không
+is_local = "localhost" in DATABASE_URL or "127.0.0.1" in DATABASE_URL
+
+connect_args = {}
+
+# 2. Chỉ cấu hình SSL nếu KHÔNG PHẢI môi trường local (chạy trên Aiven/Supabase)
+if not is_local:
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    connect_args["ssl"] = ssl_context
+else:
+    print("--- 🔌 Đang kết nối tới Database LOCAL: Tự động tắt SSL ---")
 
 # Create database engine
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    DATABASE_URL,
     echo=False,
     future=True,
     pool_size=10,
     max_overflow=20,
-    connect_args={
-        "ssl": ssl_context  # <--- 3. Truyền bộ cấu hình SSL vào đây
-    }
+    connect_args=connect_args  # <--- Cấu hình này giờ sẽ tự động rỗng {} khi chạy Local
 )
 
 # Async session factory

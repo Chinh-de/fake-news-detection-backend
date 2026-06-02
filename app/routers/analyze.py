@@ -3,8 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.schemas.prediction import AnalyzeRequest, AnalyzeResponse
 from app.services.prediction_service import prediction_service
+import logging
 
 router = APIRouter(prefix="/analyze", tags=["analysis"])
+logger = logging.getLogger("analyze_router")
 
 @router.post("", response_model=AnalyzeResponse, status_code=status.HTTP_200_OK)
 async def analyze_news(request: AnalyzeRequest, db: AsyncSession = Depends(get_db)):
@@ -58,6 +60,7 @@ async def analyze_news(request: AnalyzeRequest, db: AsyncSession = Depends(get_d
             created_at=record.created_at
         )
     except Exception as e:
+        logger.exception("Lỗi hệ thống khi chạy phân tích RAG+LLM: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Lỗi hệ thống khi chạy phân tích RAG+LLM: {str(e)}"

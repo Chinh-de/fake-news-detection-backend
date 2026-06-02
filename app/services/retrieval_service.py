@@ -1,8 +1,11 @@
 import os
+import asyncio
 import re
 import random
 import time
 import wikipedia
+# Override default User-Agent to bypass Wikipedia's robot detection/blocking
+wikipedia.wikipedia.USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 import duckdb
 import numpy as np
 from bs4 import BeautifulSoup
@@ -44,6 +47,16 @@ ALL_SYNONYM_LABELS = [
 class RetrievalService:
     def __init__(self):
         self._encoder = None
+        self._wiki_session = None
+
+    def _get_wiki_session(self):
+        """Lazy load the curl_cffi AsyncSession for Wikipedia requests to keep connections alive and prevent 429s."""
+        if self._wiki_session is None:
+            self._wiki_session = curl_requests.AsyncSession()
+            self._wiki_session.headers.update({
+                "User-Agent": "FakeNewsDetectionBot/1.0 (https://github.com/Fake-news-detection; contact@fakenewsdetection.com) curl-cffi/0.6"
+            })
+        return self._wiki_session
 
     def get_encoder(self) -> SentenceTransformer:
         """Lazy load and cache the embedding model on disk."""
@@ -57,27 +70,83 @@ class RetrievalService:
             logger.info("Embedding model loaded.")
         return self._encoder
 
-    def query_wikipedia(self, entity: str, lang: str = "vi", fetch_full: bool = False) -> str:
-        """Query Wikipedia for a given entity definition."""
-        try:
-            wikipedia.set_lang(lang)
-            if fetch_full:
-                page = wikipedia.page(entity, auto_suggest=False)
-                return page.content
-            else:
-                return wikipedia.summary(entity, auto_suggest=False)
-        except Exception:
-            return "Not found"
+    async def query_wikipedia(self, entity: str, lang: str = "vi", fetch_full: bool = False, max_retries: int = 2) -> str:
+        """Query Wikipedia for a given entity definition using curl_cffi AsyncSession to bypass WAF blocks/rate-limits."""
+        url = f"https://{lang}.wikipedia.org/w/api.php"
+        session = self._get_wiki_session()
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                # 1. Search for the entity using action=opensearch (auto-complete / prefix matching)
+                search_params = {
+                    "action": "opensearch",
+                    "format": "json",
+                    "search": entity,
+                    "limit": 1
+                }
+                
+                r = await session.get(url, params=search_params, timeout=10)
+                if r.status_code != 200:
+                    raise Exception(f"HTTP error {r.status_code}")
+                
+                data = r.json()
+                if len(data) < 2 or not data[1]:
+                    return "Not found"
+                
+                title = data[1][0]
+                
+                # 2. Get the extract (summary) for the exact title
+                query_params = {
+                    "action": "query",
+                    "format": "json",
+                    "prop": "extracts",
+                    "exintro": True,
+                    "explaintext": True,
+                    "titles": title,
+                    "redirects": 1
+                }
+                
+                r = await session.get(url, params=query_params, timeout=10)
+                if r.status_code != 200:
+                    raise Exception(f"HTTP error {r.status_code}")
+                
+                pages = r.json().get("query", {}).get("pages", {})
+                for page_id, page_data in pages.items():
+                    if page_id == "-1":
+                        continue
+                    extract = page_data.get("extract", "").strip()
+                    if extract:
+                        return extract
+                
+                return "Not found"
+            except Exception as e:
+                logger.warning("Wikipedia query for '%s' failed (attempt %d/%d): %s", entity, attempt, max_retries, e)
+                if attempt < max_retries:
+                    # Sleep longer on rate limit / 429 to let WAF clear, using asyncio.sleep instead of time.sleep
+                    sleep_time = 3.0 * attempt if "429" in str(e) else 0.5 * attempt
+                    await asyncio.sleep(sleep_time)
+        return "Not found"
+
 
     async def get_wiki_definitions(self, entities: list[str]) -> dict[str, str]:
-        """Fetch Wikipedia definitions for a list of entities."""
+        """Fetch Wikipedia definitions for a list of entities concurrently using curl_cffi AsyncSession."""
+        if not entities:
+            return {}
+        
+        # Deduplicate and filter out empty entities
+        unique_entities = sorted(list(set(ent.strip() for ent in entities if ent and ent.strip())))
+        if not unique_entities:
+            return {}
+            
+        tasks = [self.query_wikipedia(ent, lang="vi", fetch_full=False) for ent in unique_entities]
+        
+        # Execute concurrently
+        results = await asyncio.gather(*tasks)
+        
         res = {}
-        for ent in entities:
-            if not ent or not ent.strip():
-                continue
-            definition = self.query_wikipedia(ent.strip(), lang="vi", fetch_full=False)
-            if "Not found" not in definition:
-                res[ent.strip()] = definition
+        for ent, definition in zip(unique_entities, results):
+            if definition and "Not found" not in definition:
+                res[ent] = definition
         return res
 
     async def search_postgres_corpus(self, db, query_text: str, limit: int = 8) -> list[dict]:

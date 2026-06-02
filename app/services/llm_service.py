@@ -49,7 +49,7 @@ class LLMService:
             
         return provider, base_url, api_key, model_name
 
-    async def call_llm(self, db, system_prompt: str, user_prompt: str, max_tokens: int = 256) -> str:
+    async def call_llm(self, db, system_prompt: str, user_prompt: str, max_tokens: int = 1024) -> str:
         """
         Call the dynamic LLM provider (openai or genai) configured in DB.
         """
@@ -84,6 +84,11 @@ class LLMService:
                 top_p=1.0,
                 max_output_tokens=max_tokens,
                 top_k=40,
+                response_mime_type="application/json", 
+                # === THÊM ĐOẠN NÀY ĐỂ TẮT THINKING (TIẾT KIỆM TOKENS) ===
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=0  # Set budget bằng 0 để tắt hẳn chế độ suy luận ngầm
+                ),
 
                 # === QUAN TRỌNG: TẮT AFC ===
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(
@@ -92,13 +97,47 @@ class LLMService:
                 ),
                 
                 # Tùy chọn thêm
-                safety_settings=[
-                    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                    types.SafetySetting(category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, threshold=types.HarmBlockThreshold.BLOCK_NONE),
-                ]
+                safety_settings = [
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH, 
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_HARASSMENT, 
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE
+                ),
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, 
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE
+                ),
+                # QUAN TRỌNG NHẤT: Chặn đứng việc chặt cụt tin đồn y tế/khoa học/5G
+                types.SafetySetting(
+                    category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, 
+                    threshold=types.HarmBlockThreshold.BLOCK_NONE
+                ),
+            ]
+
             )
             
             contents = [types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)])]
+
+            def _summarize_genai_response(response) -> str:
+                candidate_summaries = []
+                try:
+                    for index, candidate in enumerate(getattr(response, "candidates", []) or [], start=1):
+                        finish_reason = getattr(candidate, "finish_reason", None)
+                        candidate_summaries.append(
+                            f"candidate[{index}].finish_reason={finish_reason}"
+                        )
+                except Exception as summary_err:
+                    candidate_summaries.append(f"candidate_summary_error={summary_err}")
+
+                summary_text = "; ".join(candidate_summaries) if candidate_summaries else "no_candidates_returned"
+                return (
+                    f"model={model_name}, max_output_tokens={max_tokens}, "
+                    f"system_prompt_chars={len(system_prompt)}, user_prompt_chars={len(user_prompt)}, "
+                    f"response_has_text={response.text is not None}, {summary_text}"
+                )
             
             def _sync_call_genai():
                 response = client.models.generate_content(
@@ -106,14 +145,21 @@ class LLMService:
                     config=config,
                     contents=contents
                 )
+                logger.info("GenAI response details: %s", response)
                 if response.text is None:
                     err_msg = "Google GenAI trả về phản hồi rỗng (None)."
                     try:
                         if response.candidates and len(response.candidates) > 0:
-                            finish_reason = response.candidates[0].finish_reason
-                            err_msg += f" Lý do dừng: {finish_reason}."
+                            finish_reasons = []
+                            for candidate in response.candidates:
+                                finish_reasons.append(str(getattr(candidate, "finish_reason", None)))
+                            err_msg += f" Lý do dừng: {', '.join(finish_reasons)}."
                     except Exception:
                         pass
+                    logger.error(
+                        "GenAI empty response details: %s",
+                        _summarize_genai_response(response)
+                    )
                     raise ValueError(err_msg)
                 return response.text.strip()
                 
@@ -130,7 +176,7 @@ class LLMService:
                 
                 return content
             except Exception as e:
-                logger.error("Error calling GenAI LLM: %s", e)
+                logger.exception("Error calling GenAI LLM: %s", e)
                 raise e
         else:
             logger.info("Calling OpenAI LLM at %s using model %s...", base_url, model_name)
@@ -177,7 +223,7 @@ class LLMService:
                 
                 return content
             except Exception as e:
-                logger.error("Error calling OpenAI LLM: %s", e)
+                logger.exception("Error calling OpenAI LLM: %s", e)
                 raise e
 
     def parse_llm_json_response(self, raw_response: str) -> tuple[int, str]:

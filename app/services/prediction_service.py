@@ -138,8 +138,8 @@ class PredictionService:
         # Log the entity extraction prompts when analysis logging enabled
         try:
             if settings.ENABLE_ANALYSIS_LOG:
-                logger.debug("Entity extraction system prompt:\n%s", entity_sys_prompt)
-                logger.debug("Entity extraction user prompt:\n%s", entity_user_prompt)
+                logger.info("Entity extraction system prompt:\n%s", entity_sys_prompt)
+                logger.info("Entity extraction user prompt:\n%s", entity_user_prompt)
         except Exception:
             pass
 
@@ -147,12 +147,15 @@ class PredictionService:
             db,
             entity_sys_prompt,
             entity_user_prompt,
-            max_tokens=128
+            max_tokens=1024
         )
         clean_resp = raw_entities.replace("```json", "").replace("```", "").strip()
         match = re.search(r"\{.*\}", clean_resp, re.DOTALL)
         if match:
             clean_resp = match.group(0)
+        
+        logger.info("Raw entity extraction response:\n%s", raw_entities)
+
         data = json.loads(clean_resp)
         entities = data.get("entities", [])
         search_query = data.get("query", search_query)
@@ -206,7 +209,7 @@ class PredictionService:
         logger.debug("Final prompt length=%d", len(final_user_prompt))
         logger.debug("Final prompt:\n%s", final_user_prompt)
 
-        llm_raw = await llm_service.call_llm(db, final_system_prompt, final_user_prompt, max_tokens=256)
+        llm_raw = await llm_service.call_llm(db, final_system_prompt, final_user_prompt, max_tokens=4096)
         llm_label, llm_explanation = llm_service.parse_llm_json_response(llm_raw)
             
         if record:

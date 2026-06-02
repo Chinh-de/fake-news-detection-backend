@@ -5,19 +5,30 @@ from typing import Tuple, Dict, List
 # ==========================================
 
 FINAL_CLASSIFICATION_SYSTEM_PROMPT = (
-    "Bạn là chuyên gia kiểm chứng tin tức. "
-    "Nhiệm vụ: Phân loại bài viết dựa trên <VERIFIED_REPORTS> và <ENTITY_DEFINITIONS>.\n\n"
-    "QUY TẮC:\n"
-    "- Nếu dữ liệu RAG hỗ trợ nội dung -> 'Thật'.\n"
-    "- Nếu dữ liệu RAG phản đối -> 'Giả'.\n"
-    "- Nếu dữ liệu RAG lạc đề/thiếu thông tin -> LỜ ĐI, tự dự đoán dựa trên kiến thức của bạn.\n"
-    "- Định dạng JSON: {\"label\": \"Thật\" hoặc \"Giả\", \"explanation\": \"Kết luận trước, sau đó giải thích ngắn gọn bằng chứng/lý do.\"}"
+    "Bạn là một chuyên gia phân tích và kiểm chứng tin tức có tư duy sắc bén. "
+    "Nhiệm vụ của bạn là đánh giá tính xác thực của <BÀI_VIẾT> dưới dạng một đối tượng JSON.\n\n"
+    
+    "QUY TRÌNH TƯ DUY 2 BẬC (BẮT BUỘC THEO THỨ TỰ):\n"
+    "BẬC 1: ĐỐI CHIẾU BẰNG CHỨNG (RAG)\n"
+    "- Đầu tiên, hãy xem kỹ dữ liệu trong <VERIFIED_REPORTS> và <ENTITY_DEFINITIONS>.\n"
+    "- Nếu dữ liệu RAG có liên quan và cung cấp đủ thông tin, bạn PHẢI dựa hoàn toàn vào đó để kết luận 'Thật' hoặc 'Giả'.\n\n"
+    
+    "BẬC 2: SUY LUẬN LOGIC TỰ NHIÊN (Khi RAG thiếu/lạc đề hoặc sự kiện quá mới)\n"
+    "- Nếu dữ liệu RAG hoàn toàn lạc đề hoặc trống rỗng, hãy đóng vai trò là một người có tri thức rộng và logic thông thường để tự phân tích.\n"
+    "- Sử dụng các quy luật logic, kiến thức xã hội, khoa học hành vi hoặc bối cảnh lịch sử của bạn để đưa ra DỰ ĐOÁN hợp lý nhất.\n"
+    "- Ví dụ: Một tin tức nói về 'công nghệ bất tử người bằng nước muối' - dù RAG trống, logic thông thường của bạn vẫn phải khẳng định đây là tin 'Giả'.\n\n"
+    
+    "ĐỊNH DẠNG ĐẦU RA (JSON BẮT BUỘC):\n"
+    "Chỉ trả về duy nhất một chuỗi JSON hợp lệ. KHÔNG dùng thẻ markdown (như ```json), không giải thích bên ngoài.\n"
+    '- Cấu trúc: {"label": "Thật" hoặc "Giả", "explanation": "[Nêu rõ nhãn ở 2 từ đầu] Chuỗi lập luận cô đọng (DƯỚI 3 CÂU). NGHIÊM CẤM sao chép lại diễn biến cốt truyện của bài viết hoặc liệt kê lại hàng loạt dữ liệu từ RAG. Hãy tập trung khẳng định trực tiếp: Các luận điểm, số liệu cốt lõi của bài viết TRÙNG KHỚP hoàn toàn (nếu Thật) hoặc MÂU THUẪN ở chi tiết cụ thể nào (nếu Giả) so với báo cáo xác minh chính thống nào."}'
+
 )
 
-FINAL_CLASSIFICATION_USER_PROMPT_TEMPLATE = """NỀN TẢNG THÔNG TIN KIỂM CHỨNG:
+FINAL_CLASSIFICATION_USER_PROMPT_TEMPLATE = """DỮ LIỆU ĐỐI CHIẾU (NẾU CÓ):
 <VERIFIED_REPORTS>
 {rag_text}
 </VERIFIED_REPORTS>
+
 <ENTITY_DEFINITIONS>
 {wiki_text}
 </ENTITY_DEFINITIONS>
@@ -25,15 +36,14 @@ FINAL_CLASSIFICATION_USER_PROMPT_TEMPLATE = """NỀN TẢNG THÔNG TIN KIỂM CH
 BÀI VIẾT CẦN PHÂN LOẠI:
 Nội dung: "{text_input}"
 
-VÍ DỤ MẪU:
+CÁC VÍ DỤ MẪU ĐỂ HỌC TẬP:
 {demo_text}
 
-HƯỚNG DẪN:
-- Phân tích và đưa ra JSON.
-- Explanation PHẢI nêu kết luận ngay ở đầu câu.
-- Nếu thông tin RAG lạc đề, hãy tự dự đoán dựa trên kiến thức của bạn và giải thích dự đoán.
-- NHẤT ĐỊNH PHẢI TRẢ VỀ JSON HỢP LỆ, KHÔNG GIẢI THÍCH BÊN NGOÀI, KHÔNG DÙNG THẺ MARKDOWN.
-- NHÃN PHẢI LÀ "Thật" hoặc "Giả", KHÔNG DÙNG TỪ NÀO KHÁC.
+HƯỚNG DẪN THỰC THI:
+- Phân tích theo quy trình 2 bậc (Ưu tiên RAG -> Không có RAG thì dùng Logic).
+- Trường "explanation" bắt buộc phải viết nhãn kết luận ở ngay đầu câu (Ví dụ: "[Thật] ..." hoặc "[Giả] ...").
+- Ép các dấu nháy kép bên trong chuỗi giải thích thành \\\" để không làm hỏng cấu trúc JSON.
+
 Kết luận (JSON):"""
 
 
@@ -56,26 +66,35 @@ def build_final_classification_prompt(
     if rag_evidence:
         rag_text = ""
         for item in rag_evidence:
-            rag_text += f"- Title: {item['title']}\n  Key Information: {item['chunk_text']}\n\n"
+            # Escape nháy kép của văn bản RAG để an toàn cho JSON đầu ra
+            clean_chunk = item['chunk_text'].replace('"', '\\"')
+            rag_text += f"- Title: {item['title']}\n  Key Information: {clean_chunk}\n\n"
         rag_text = rag_text.strip()
     else:
         rag_text = "- Title: No verified report found\n  Key Information: No trusted fact evidence found."
 
-    # 3. Ví dụ mẫu (Few-shot)
+    # 3. Ví dụ mẫu (Few-shot) - Đã sửa định dạng gán nhãn đầu câu giải thích
     if fewshot_demos:
         demo_text = ""
         for i, demo in enumerate(fewshot_demos, start=1):
-            # Sử dụng trực tiếp nhãn gốc để mô hình học sự đa dạng
             label = demo["label"] 
-            
-            demo_text += f'\n[Ví dụ {i}]\nNội dung: "{demo["text"].strip()}..."\nKết luận (JSON): {{"label": "{label}", "explanation": "[Kết luận] vì [Lý do/Bằng chứng]"}}\n'
+            # Định hình cấu trúc giải thích mẫu luôn bắt đầu bằng: [{label}] để LLM bắt chước theo đúng quy tắc
+            demo_text += f'\n[Ví dụ {i}]\nNội dung: "{demo["text"].strip()}..."\nKết luận (JSON): {{"label": "{label}", "explanation": "[{label}] Vì dữ liệu thực tế cho thấy..."}}\n'
     else:
-        demo_text = "\n(Không có ví dụ)\n"
+        # Dự phòng một ví dụ suy luận logic thông thường nếu DB demo bị trống
+        demo_text = (
+            '\n[Ví dụ mẫu]\n'
+            'Nội dung: "Phát hiện người ngoài hành tinh đáp xuống Hà Nội..."\n'
+            'Kết luận (JSON): {"label": "Giả", "explanation": "[Giả] Mặc dù RAG không có dữ liệu, nhưng theo logic khoa học phổ thông hiện tại chưa có bằng chứng sinh vật ngoài Trái Đất đổ bộ."}\n'
+        )
+
+    # 4. Bảo vệ text_input khỏi lỗi nháy kép lồng nhau và lỗi xuống dòng làm vỡ JSON
+    sanitized_input = text_input.replace('"', '\\"').replace('\n', ' ')
 
     user_prompt = FINAL_CLASSIFICATION_USER_PROMPT_TEMPLATE.format(
         rag_text=rag_text,
         wiki_text=wiki_text,
         demo_text=demo_text.strip(),
-        text_input=text_input.strip()
+        text_input=sanitized_input.strip()
     )
     return FINAL_CLASSIFICATION_SYSTEM_PROMPT, user_prompt
