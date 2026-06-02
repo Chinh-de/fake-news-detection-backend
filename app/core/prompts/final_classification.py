@@ -1,4 +1,5 @@
 from typing import Tuple, Dict, List
+import datetime
 
 # ==========================================
 # 2. FINAL CLASSIFICATION PROMPTS
@@ -13,18 +14,20 @@ FINAL_CLASSIFICATION_SYSTEM_PROMPT = (
     "- Đầu tiên, hãy xem kỹ dữ liệu trong <VERIFIED_REPORTS> và <ENTITY_DEFINITIONS>.\n"
     "- Nếu dữ liệu RAG có liên quan và cung cấp đủ thông tin, bạn PHẢI dựa hoàn toàn vào đó để kết luận 'Thật' hoặc 'Giả'.\n\n"
     
-    "BẬC 2: SUY LUẬN LOGIC TỰ NHIÊN (Khi RAG thiếu/lạc đề hoặc sự kiện quá mới)\n"
-    "- Nếu dữ liệu RAG hoàn toàn lạc đề hoặc trống rỗng, hãy đóng vai trò là một người có tri thức rộng và logic thông thường để tự phân tích.\n"
-    "- Sử dụng các quy luật logic, kiến thức xã hội, khoa học hành vi hoặc bối cảnh lịch sử của bạn để đưa ra DỰ ĐOÁN hợp lý nhất.\n"
+    "BẬC 2: SUY LUẬN LOGIC & ĐỘ LỆCH THỜI GIAN (Khi RAG thiếu/tin quá mới)\n"
+    "- Nếu dữ liệu đối chiếu (RAG) trống hoặc chưa cập nhật kịp các sự kiện mới diễn ra gần đây, hãy tự phân tích bằng logic.\n"
+    "- QUY TẮC CẤM ĐOÁN BỪA: Bộ nhớ và kiến thức cũ của bạn có thể đã lỗi thời đối với những thông tin có thể thay đổi theo thời gian (Ví dụ: chức vụ, nhân sự mới được bổ nhiệm, hoặc công nghệ mới vừa ra mắt). TUYỆT ĐỐI không được kết luận bài viết là 'Giả' chỉ vì thông tin đó không có trong trí nhớ cũ của bạn khi dữ liệu RAG bị thiếu. Nếu văn phong bài viết nghiêm túc, chính thống, hãy dựa vào tính logic tổng thể hoặc kết luận là cần kiểm chứng thêm.\n\n"
     "- Ví dụ: Một tin tức nói về 'công nghệ bất tử người bằng nước muối' - dù RAG trống, logic thông thường của bạn vẫn phải khẳng định đây là tin 'Giả'.\n\n"
     
     "ĐỊNH DẠNG ĐẦU RA (JSON BẮT BUỘC):\n"
     "Chỉ trả về duy nhất một chuỗi JSON hợp lệ. KHÔNG dùng thẻ markdown (như ```json), không giải thích bên ngoài.\n"
-    '- Cấu trúc: {"label": "Thật" hoặc "Giả", "explanation": "[Nêu rõ nhãn ở 2 từ đầu] Chuỗi lập luận cô đọng (DƯỚI 3 CÂU). NGHIÊM CẤM sao chép lại diễn biến cốt truyện của bài viết hoặc liệt kê lại hàng loạt dữ liệu từ RAG. Hãy tập trung khẳng định trực tiếp: Các luận điểm, số liệu cốt lõi của bài viết TRÙNG KHỚP hoàn toàn (nếu Thật) hoặc MÂU THUẪN ở chi tiết cụ thể nào (nếu Giả) so với báo cáo xác minh chính thống nào."}'
-
+    '- Cấu trúc: {"label": "Thật" hoặc "Giả", "explanation": "[Viết rõ nhãn ở đầu câu, ví dụ: [Thật] hoặc [Giả]] Chuỗi lập luận cô đọng (DƯỚI 3 CÂU). NGHIÊM CẤM sao chép lại diễn biến cốt truyện của bài viết hoặc liệt kê lại hàng loạt dữ liệu từ RAG. Hãy tập trung khẳng định trực tiếp: Các luận điểm, số liệu cốt lõi của bài viết TRÙNG KHỚP hoàn toàn (nếu Thật) hoặc MÂU THUẪN ở chi tiết cụ thể nào (nếu Giả) so với báo cáo xác minh chính thống nào."}'
 )
 
-FINAL_CLASSIFICATION_USER_PROMPT_TEMPLATE = """DỮ LIỆU ĐỐI CHIẾU (NẾU CÓ):
+FINAL_CLASSIFICATION_USER_PROMPT_TEMPLATE = """MỐC THỜI GIAN HỆ THỐNG HIỆN TẠI: {current_time}
+(Lưu ý: Luôn đối chiếu mốc thời gian của bài viết với mốc thời gian hiện tại này để tránh nhầm lẫn về mặt sự kiện thời sự).
+
+DỮ LIỆU ĐỐI CHIẾU (NẾU CÓ):
 <VERIFIED_REPORTS>
 {rag_text}
 </VERIFIED_REPORTS>
@@ -40,7 +43,7 @@ CÁC VÍ DỤ MẪU ĐỂ HỌC TẬP:
 {demo_text}
 
 HƯỚNG DẪN THỰC THI:
-- Phân tích theo quy trình 2 bậc (Ưu tiên RAG -> Không có RAG thì dùng Logic).
+- Phân tích theo quy trình 2 bậc (Ưu tiên RAG -> Không có RAG thì dùng Logic kết hợp bối cảnh thời gian hiện tại).
 - Trường "explanation" bắt buộc phải viết nhãn kết luận ở ngay đầu câu (Ví dụ: "[Thật] ..." hoặc "[Giả] ...").
 - Ép các dấu nháy kép bên trong chuỗi giải thích thành \\\" để không làm hỏng cấu trúc JSON.
 
@@ -56,6 +59,10 @@ def build_final_classification_prompt(
     """
     Xây dựng System Prompt và User Prompt phục vụ cho quá trình kiểm duyệt / kết luận tin tức cuối cùng.
     """
+    # 0. Định dạng mốc thời gian động đưa vào hệ thống
+    now = datetime.datetime.now()
+    current_time_str = now.strftime("Thứ %w, ngày %d/%m/%Y lúc %H:%M:%S")
+
     # 1. Định nghĩa thực thể Wikipedia
     if wiki_definitions:
         wiki_text = "\n".join([f"- Entity: {k}\n  Definition: {v}" for k, v in wiki_definitions.items()])
@@ -73,25 +80,26 @@ def build_final_classification_prompt(
     else:
         rag_text = "- Title: No verified report found\n  Key Information: No trusted fact evidence found."
 
-    # 3. Ví dụ mẫu (Few-shot) - Đã sửa định dạng gán nhãn đầu câu giải thích
+    # 3. Ví dụ mẫu (Few-shot) - Đã đồng bộ định dạng gán nhãn [Thật]/[Giả] gọn gàng
     if fewshot_demos:
         demo_text = ""
         for i, demo in enumerate(fewshot_demos, start=1):
             label = demo["label"] 
-            # Định hình cấu trúc giải thích mẫu luôn bắt đầu bằng: [{label}] để LLM bắt chước theo đúng quy tắc
             demo_text += f'\n[Ví dụ {i}]\nNội dung: "{demo["text"].strip()}..."\nKết luận (JSON): {{"label": "{label}", "explanation": "[{label}] Vì dữ liệu thực tế cho thấy..."}}\n'
     else:
         # Dự phòng một ví dụ suy luận logic thông thường nếu DB demo bị trống
         demo_text = (
             '\n[Ví dụ mẫu]\n'
-            'Nội dung: "Phát hiện người ngoài hành tinh đáp xuống Hà Nội..."\n'
-            'Kết luận (JSON): {"label": "Giả", "explanation": "[Giả] Mặc dù RAG không có dữ liệu, nhưng theo logic khoa học phổ thông hiện tại chưa có bằng chứng sinh vật ngoài Trái Đất đổ bộ."}\n'
+            'Nội dung: "Phát hiện công nghệ bất tử người bằng nước muối..."\n'
+            'Kết luận (JSON): {"label": "Giả", "explanation": "[Giả] Mặc dù RAG không có dữ liệu, nhưng theo logic khoa học phổ thông hiện tại chưa có bằng chứng phương pháp này khả thi."}\n'
         )
 
     # 4. Bảo vệ text_input khỏi lỗi nháy kép lồng nhau và lỗi xuống dòng làm vỡ JSON
     sanitized_input = text_input.replace('"', '\\"').replace('\n', ' ')
 
+    # === VÁ LỖI TẠI ĐÂY: Đã bổ sung biến current_time vào hàm format ===
     user_prompt = FINAL_CLASSIFICATION_USER_PROMPT_TEMPLATE.format(
+        current_time=current_time_str,
         rag_text=rag_text,
         wiki_text=wiki_text,
         demo_text=demo_text.strip(),

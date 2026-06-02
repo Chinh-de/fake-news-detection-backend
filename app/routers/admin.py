@@ -23,7 +23,7 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 def _default_llm_model(provider: str) -> str:
     if provider == "genai":
-        return "gemma-4-26b-a4b-it"
+        return "gemini-3.1-flash-lite"
     return "Qwen/Qwen3-4B-AWQ"
 
 @router.post("/login", response_model=TokenResponse, status_code=status.HTTP_200_OK)
