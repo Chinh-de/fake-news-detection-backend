@@ -309,7 +309,7 @@ class RetrievalService:
         """Tìm kiếm trusted domains, thử xen kẽ yahoo -> bing -> yahoo -> bing."""
         site_filter = " OR ".join([f"site:{d}" for d in TRUST_DOMAINS])
         full_query = f"{query} ({site_filter})".strip()
-        logger.debug("Trusted search full query: %s", full_query)
+        logger.warning("Trusted search full query: %s", full_query)
 
         backends = ["bing", "yahoo"]
         max_attempts = 2
@@ -324,7 +324,7 @@ class RetrievalService:
                     
                     results = await loop.run_in_executor(None, _do_search)
                     if results:
-                        logger.info(
+                        logger.warning(
                             "Trusted search SUCCESS with backend=%s (attempt %d): %d results",
                             backend,
                             attempt,
@@ -336,7 +336,7 @@ class RetrievalService:
                     logger.error("Trusted search backend=%s attempt %d failed: %s", backend, attempt, e)
                 await asyncio.sleep(0.5)
 
-        logger.info("Trusted search returned no results for query=%s", query)
+        logger.warning("Trusted search returned no results for query=%s", query)
         return []
 
     def scrape_article_text(self, url: str) -> str:
@@ -361,12 +361,12 @@ class RetrievalService:
             text_content = re.sub(r"\[.*?\]", "", text_content)
             out = re.sub(r"\s+", " ", text_content).strip()
             try:
-                logger.debug("Scraped URL=%s status=%d len=%d", url, response.status_code, len(out))
+                logger.warning("Scraped URL=%s status=%d len=%d", url, response.status_code, len(out))
             except Exception:
                 pass
             return out
         except Exception:
-            logger.debug("Failed scraping URL=%s", url)
+            logger.warning("Failed scraping URL=%s", url)
             return ""
 
     def chunk_text(self, text_str: str, chunk_size: int = 1000, overlap: int = 150) -> list[str]:
@@ -479,7 +479,7 @@ class RetrievalService:
         # Clean input query: slice to max 300 chars
         cleaned_input_query = post_normalized_text[:300].strip()
         
-        logger.info("Running parallel trusted search. Query 1 (LLM): '%s', Query 2 (Clean Input): '%s'", query_text, cleaned_input_query)
+        logger.warning("Running parallel trusted search. Query 1 (LLM): '%s', Query 2 (Clean Input): '%s'", query_text, cleaned_input_query)
         
         # Run both searches in parallel
         task1 = self.search_trusted_articles(query_text, 5)
@@ -516,7 +516,7 @@ class RetrievalService:
                     seen_urls.add(norm_url)
                     results.append(r)
                 
-        logger.info("RAG trusted search combined results=%d (LLM=%d, Clean Input=%d)", len(results), len(results1), len(results2))
+        logger.warning("RAG trusted search combined results=%d (LLM=%d, Clean Input=%d)", len(results), len(results1), len(results2))
         if not results:
             return []
 
@@ -550,7 +550,7 @@ class RetrievalService:
                     "url": r["url"],
                     "source": "trusted_internet"
                 })
-        logger.info("RAG scraped chunks=%d", len(chunks))
+        logger.warning("RAG scraped chunks=%d", len(chunks))
         if not chunks:
             return []
             
@@ -571,7 +571,7 @@ class RetrievalService:
         # Sort and select top 4
         scored_indices = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
         top_indices = [idx for idx, _ in scored_indices[:4]]
-        logger.info("RAG selected chunks=%d", len(top_indices))
+        logger.warning("RAG selected chunks=%d", len(top_indices))
         
         evidence = []
         for idx in top_indices:
@@ -583,11 +583,11 @@ class RetrievalService:
                 "url": chunk_info["url"],
                 "source": chunk_info["source"]
             })
-        logger.debug("selected evidence count=%d", len(evidence))
+        logger.warning("Selected evidence count=%d", len(evidence))
         try:
-            if settings.ENABLE_ANALYSIS_LOG:
-                for e in evidence:
-                    logger.debug("Selected evidence: url=%s score=%s title=%s", e.get("url"), e.get("score"), e.get("title"))
+            for idx, e in enumerate(evidence, 1):
+                logger.warning("RAG Evidence #%d: url=%s score=%.4f title=%s", idx, e.get("url"), e.get("score"), e.get("title"))
+                logger.warning("RAG Evidence #%d Chunk: %s", idx, e.get("chunk_text")[:200] + "..." if len(e.get("chunk_text", "")) > 200 else e.get("chunk_text"))
         except Exception:
             pass
             
