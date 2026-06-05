@@ -307,13 +307,13 @@ class RetrievalService:
             
         return fewshots
 
-    async def search_trusted_articles(self, query: str, max_urls: int = 5) -> list[dict]:
+    async def search_trusted_articles(self, query: str, max_urls: int = 10) -> list[dict]:
         """Tìm kiếm trusted domains, thử xen kẽ yahoo -> bing -> yahoo -> bing."""
         site_filter = " OR ".join([f"site:{d}" for d in TRUST_DOMAINS])
         full_query = f"{query} ({site_filter})".strip()
         logger.warning("Trusted search full query: %s", full_query)
 
-        backends = ["yahoo", "brave", "auto"]
+        backends = ["yahoo", "brave", "bing", "auto"]
         max_attempts = 2
         loop = asyncio.get_event_loop()
 
@@ -487,8 +487,8 @@ class RetrievalService:
         logger.warning("Running parallel trusted search. Query 1 (LLM): '%s', Query 2 (Clean Input): '%s'", query_text, cleaned_input_query)
         
         # Run both searches in parallel
-        task1 = self.search_trusted_articles(query_text, 5)
-        task2 = self.search_trusted_articles(cleaned_input_query, 5)
+        task1 = self.search_trusted_articles(query_text, 10)
+        task2 = self.search_trusted_articles(cleaned_input_query, 10)
         
         results1, results2 = await asyncio.gather(task1, task2)
         
