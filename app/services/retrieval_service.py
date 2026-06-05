@@ -313,7 +313,7 @@ class RetrievalService:
         full_query = f"{query} ({site_filter})".strip()
         logger.warning("Trusted search full query: %s", full_query)
 
-        backends = ["bing", "yahoo"]
+        backends = ["yahoo", "brave", "auto"]
         max_attempts = 2
         loop = asyncio.get_event_loop()
 
