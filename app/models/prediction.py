@@ -23,6 +23,7 @@ class PredictionRecord(Base):
     final_prompt = Column(Text, nullable=True)         # The final prompt sent to the LLM
     
     is_trained = Column(Boolean, default=False, nullable=False)
+    hf_commit = Column(String, nullable=True)
     
     fb_post_created_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)

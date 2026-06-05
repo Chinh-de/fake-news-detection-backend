@@ -21,7 +21,7 @@ FINAL_CLASSIFICATION_SYSTEM_PROMPT = (
     
     "ĐỊNH DẠNG ĐẦU RA (JSON BẮT BUỘC):\n"
     "Chỉ trả về duy nhất một chuỗi JSON hợp lệ. KHÔNG dùng thẻ markdown (như ```json), không giải thích bên ngoài.\n"
-    '- Cấu trúc: {"label": "Thật" hoặc "Giả", "explanation": "[Viết rõ nhãn ở đầu câu, ví dụ: [Thật] hoặc [Giả]] Chuỗi lập luận cô đọng (DƯỚI 3 CÂU). NGHIÊM CẤM sao chép lại diễn biến cốt truyện của bài viết hoặc liệt kê lại hàng loạt dữ liệu từ RAG. Hãy tập trung khẳng định trực tiếp: Các luận điểm, số liệu cốt lõi của bài viết TRÙNG KHỚP hoàn toàn (nếu Thật) hoặc MÂU THUẪN ở chi tiết cụ thể nào (nếu Giả) so với báo cáo xác minh chính thống nào."}'
+    '- Cấu trúc: {"label": "Thật" hoặc "Giả", "explanation": "[Viết rõ nhãn ở đầu câu, ví dụ: [Thật] hoặc [Giả]] Lập luận giải thích chi tiết, rõ ràng và thuyết phục (tối đa 10 câu). Phải chỉ rõ sự trùng khớp hoặc mâu thuẫn của bài viết so với các báo cáo xác minh chính thống về mặt: thời gian, địa điểm, nhân vật, con số và diễn biến sự kiện cụ thể. Đồng thời, ghi rõ tên các nguồn tin cậy tham chiếu (nếu có trong dữ liệu đối chiếu RAG, ví dụ: Báo Chính phủ, Tuổi Trẻ, VTV...) để làm minh chứng xác thực."}'
 )
 
 FINAL_CLASSIFICATION_USER_PROMPT_TEMPLATE = """MỐC THỜI GIAN HỆ THỐNG HIỆN TẠI: {current_time}
@@ -72,10 +72,16 @@ def build_final_classification_prompt(
     # 2. Ngữ liệu báo chí đối chiếu
     if rag_evidence:
         rag_text = ""
+        from urllib.parse import urlparse
         for item in rag_evidence:
             # Escape nháy kép của văn bản RAG để an toàn cho JSON đầu ra
             clean_chunk = item['chunk_text'].replace('"', '\\"')
-            rag_text += f"- Title: {item['title']}\n  Key Information: {clean_chunk}\n\n"
+            url = item.get('url', '')
+            try:
+                source_domain = urlparse(url).netloc.replace('www.', '') or 'N/A'
+            except Exception:
+                source_domain = 'N/A'
+            rag_text += f"- Title: {item['title']}\n  Source: {source_domain}\n  Key Information: {clean_chunk}\n\n"
         rag_text = rag_text.strip()
     else:
         rag_text = "- Title: No verified report found\n  Key Information: No trusted fact evidence found."

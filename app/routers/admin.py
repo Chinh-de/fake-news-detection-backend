@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from app.database import get_db, SessionLocal
 from app.models.config import SystemConfig
 from app.schemas.admin import (
@@ -269,4 +269,204 @@ async def get_model_update_history(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Lỗi khi lấy lịch sử cập nhật mô hình: {str(e)}"
+        )
+
+
+@router.get("/mrcd-runs", status_code=status.HTTP_200_OK)
+async def get_mrcd_runs_history(
+    current_user: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Lấy lịch sử tất cả các lượt chạy MRCD.
+    Yêu cầu quyền Admin.
+    """
+    from app.models.config import MRCDRunHistory
+    try:
+        stmt = select(MRCDRunHistory).order_by(MRCDRunHistory.triggered_at.desc())
+        res = await db.execute(stmt)
+        runs = res.scalars().all()
+        return [
+            {
+                "id": run.id,
+                "hf_commit_sha": run.hf_commit_sha,
+                "total_samples": run.total_samples,
+                "clean_count_r1": run.clean_count_r1,
+                "clean_count_r2": run.clean_count_r2,
+                "clean_count_r3": run.clean_count_r3,
+                "noisy_count_final": run.noisy_count_final,
+                "triggered_at": run.triggered_at.isoformat() if run.triggered_at else None,
+                "completed_at": run.completed_at.isoformat() if run.completed_at else None
+            }
+            for run in runs
+        ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Lỗi khi lấy lịch sử chạy MRCD: {str(e)}"
+        )
+
+
+@router.get("/mrcd-runs/{run_id}", status_code=status.HTTP_200_OK)
+async def get_mrcd_run_detail(
+    run_id: int,
+    round: int = None,
+    pool: str = None,
+    page: int = 1,
+    limit: int = 10,
+    current_user: str = Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Lấy chi tiết một lượt chạy MRCD bao gồm cả quá trình dịch chuyển các mẫu qua các vòng.
+    Hỗ trợ lọc theo vòng, phân loại tập (clean/noisy) và phân trang dưới database.
+    Yêu cầu quyền Admin.
+    """
+    from app.models.config import MRCDRunHistory, MRCDSampleRoundLog
+    from app.models.prediction import PredictionRecord
+    try:
+        # 1. Fetch run info
+        stmt_run = select(MRCDRunHistory).where(MRCDRunHistory.id == run_id)
+        res_run = await db.execute(stmt_run)
+        run = res_run.scalars().first()
+        if not run:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Không tìm thấy lượt chạy MRCD này"
+            )
+
+        # 2. Build subquery for filtered prediction_record_ids
+        if round is not None:
+            if pool == "clean":
+                query_ids = (
+                    select(MRCDSampleRoundLog.prediction_record_id)
+                    .where(MRCDSampleRoundLog.run_id == run_id)
+                    .where(MRCDSampleRoundLog.round_id == round)
+                    .where(MRCDSampleRoundLog.status.like("clean%"))
+                )
+            elif pool == "noisy":
+                query_ids = (
+                    select(MRCDSampleRoundLog.prediction_record_id)
+                    .where(MRCDSampleRoundLog.run_id == run_id)
+                    .where(MRCDSampleRoundLog.round_id == round)
+                    .where(MRCDSampleRoundLog.status.like("noisy%"))
+                )
+            else:
+                query_ids = (
+                    select(MRCDSampleRoundLog.prediction_record_id)
+                    .where(MRCDSampleRoundLog.run_id == run_id)
+                    .where(MRCDSampleRoundLog.round_id == round)
+                )
+        else:
+            if pool == "clean":
+                query_ids = (
+                    select(MRCDSampleRoundLog.prediction_record_id)
+                    .where(MRCDSampleRoundLog.run_id == run_id)
+                    .where(MRCDSampleRoundLog.status.like("clean%"))
+                    .distinct()
+                )
+            elif pool == "noisy":
+                clean_ids_subquery = (
+                    select(MRCDSampleRoundLog.prediction_record_id)
+                    .where(MRCDSampleRoundLog.run_id == run_id)
+                    .where(MRCDSampleRoundLog.status.like("clean%"))
+                )
+                query_ids = (
+                    select(MRCDSampleRoundLog.prediction_record_id)
+                    .where(MRCDSampleRoundLog.run_id == run_id)
+                    .where(MRCDSampleRoundLog.prediction_record_id.notin_(clean_ids_subquery))
+                    .distinct()
+                )
+            else:
+                query_ids = (
+                    select(MRCDSampleRoundLog.prediction_record_id)
+                    .where(MRCDSampleRoundLog.run_id == run_id)
+                    .distinct()
+                )
+
+        # Get total count of matched record IDs
+        res_count = await db.execute(select(func.count()).select_from(query_ids.subquery()))
+        total_count = res_count.scalar() or 0
+
+        # Paginate the matched record IDs
+        offset = (page - 1) * limit
+        paginated_query = query_ids.order_by(MRCDSampleRoundLog.prediction_record_id).offset(offset).limit(limit)
+        res_ids = await db.execute(paginated_query)
+        matched_ids = [r[0] for r in res_ids.all()]
+
+        # 3. Fetch related prediction records
+        records = {}
+        if matched_ids:
+            stmt_rec = select(PredictionRecord).where(PredictionRecord.id.in_(matched_ids))
+            res_rec = await db.execute(stmt_rec)
+            for rec in res_rec.scalars().all():
+                records[rec.id] = {
+                    "id": rec.id,
+                    "post_text": rec.post_text,
+                    "final_slm_label": rec.slm_label,
+                    "final_slm_conf": rec.slm_confidence,
+                    "final_llm_label": rec.llm_label,
+                    "wiki_evidence": rec.wiki_evidence,
+                    "rag_evidence": rec.rag_evidence,
+                    "fewshot_examples": rec.fewshot_examples
+                }
+
+        # 4. Fetch all round logs for matched record IDs
+        logs = []
+        if matched_ids:
+            stmt_logs = (
+                select(MRCDSampleRoundLog)
+                .where(MRCDSampleRoundLog.run_id == run_id)
+                .where(MRCDSampleRoundLog.prediction_record_id.in_(matched_ids))
+                .order_by(MRCDSampleRoundLog.prediction_record_id, MRCDSampleRoundLog.round_id)
+            )
+            res_logs = await db.execute(stmt_logs)
+            logs = res_logs.scalars().all()
+
+        # 5. Group round logs by prediction record preserving matched_ids order
+        sample_transitions = {}
+        for rec_id in matched_ids:
+            if rec_id in records:
+                sample_transitions[rec_id] = {
+                    "record": records[rec_id],
+                    "rounds": []
+                }
+
+        for log in logs:
+            rec_id = log.prediction_record_id
+            if rec_id in sample_transitions:
+                sample_transitions[rec_id]["rounds"].append({
+                    "round_id": log.round_id,
+                    "y_llm": log.y_llm,
+                    "y_slm": log.y_slm,
+                    "conf_slm": log.conf_slm,
+                    "status": log.status,
+                    "fewshot_examples": log.fewshot_examples,
+                    "rag_evidence": log.rag_evidence,
+                    "wiki_evidence": log.wiki_evidence
+                })
+
+        return {
+            "run_info": {
+                "id": run.id,
+                "hf_commit_sha": run.hf_commit_sha,
+                "total_samples": run.total_samples,
+                "clean_count_r1": run.clean_count_r1,
+                "clean_count_r2": run.clean_count_r2,
+                "clean_count_r3": run.clean_count_r3,
+                "noisy_count_final": run.noisy_count_final,
+                "triggered_at": run.triggered_at.isoformat() if run.triggered_at else None,
+                "completed_at": run.completed_at.isoformat() if run.completed_at else None
+            },
+            "samples": list(sample_transitions.values()),
+            "total_count": total_count,
+            "page": page,
+            "limit": limit
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Lỗi khi lấy chi tiết lượt chạy MRCD: {str(e)}"
         )
