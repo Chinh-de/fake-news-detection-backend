@@ -17,7 +17,6 @@ from sqlalchemy import text
 from app.config import settings
 from app.services.text_processor import clean_text_transformer, preprocess_text
 import logging
-from app.config import settings
 
 # Logger for retrieval
 logger = logging.getLogger("retrieval_service")
@@ -485,13 +484,13 @@ class RetrievalService:
         loop = asyncio.get_event_loop()
         # Clean input query: slice to max 265 chars
 
-        text = cleaned_input_query.strip()
-
-        if len(text) <= MAX_LEN:
-            full_query = text
+        input_raw_text = post_normalized_text.strip()
+    
+        if len(input_raw_text) <= MAX_LEN:
+            full_query = input_raw_text
         else:
             # cắt trong giới hạn rồi lùi về khoảng trắng gần nhất
-            cut = text[:MAX_LEN]
+            cut = input_raw_text[:MAX_LEN]
 
             last_space = cut.rfind(" ")
 
