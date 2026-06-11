@@ -24,11 +24,28 @@ class XGBoostService:
             return
 
         xgb_dir = os.path.join(settings.SLM_MODEL_PATH, "xgboost_model")
-        logger.info("Loading XGBoost components from: %s", xgb_dir)
         
-        if not os.path.exists(xgb_dir):
-            logger.error("XGBoost model directory '%s' does not exist.", xgb_dir)
-            raise FileNotFoundError(f"XGBoost model directory '{xgb_dir}' not found.")
+        # Check if the files are present, download if any are missing
+        required_files = ["xgboost_model.joblib", "phobert_scaler.joblib", "tfidf_vectorizer.joblib"]
+        missing_files = [f for f in required_files if not os.path.exists(os.path.join(xgb_dir, f))]
+        
+        if missing_files:
+            logger.info("XGBoost model components %s are missing. Downloading from Hugging Face: chinhde/xgboost_model...", missing_files)
+            os.makedirs(xgb_dir, exist_ok=True)
+            try:
+                from huggingface_hub import snapshot_download
+                snapshot_download(
+                    repo_id="chinhde/xgboost_model",
+                    local_dir=xgb_dir,
+                    local_dir_use_symlinks=False
+                )
+                logger.info("XGBoost model components downloaded successfully.")
+            except Exception as e:
+                logger.error("Failed to download XGBoost model from Hugging Face: %s", e)
+                if any(not os.path.exists(os.path.join(xgb_dir, f)) for f in required_files):
+                    raise FileNotFoundError(f"XGBoost model files not found locally and download failed: {e}")
+
+        logger.info("Loading XGBoost components from: %s", xgb_dir)
 
         # Load models
         try:

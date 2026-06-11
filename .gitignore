@@ -15,6 +15,7 @@ venv/
 
 # Model artifacts and large binaries
 model/downloads/
+model/xgboost_model/
 model/*.safetensors
 model/*.pt
 
