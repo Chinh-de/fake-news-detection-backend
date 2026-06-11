@@ -58,7 +58,9 @@ async def analyze_news(request: AnalyzeRequest, db: AsyncSession = Depends(get_d
             rag_evidence=rag_evidence_formatted,
             fewshot_examples=fewshot_formatted,
             final_prompt=record.final_prompt,
-            created_at=record.created_at
+            created_at=record.created_at,
+            xgboost_label=getattr(record, "xgboost_label", None),
+            xgboost_confidence=getattr(record, "xgboost_confidence", None)
         )
     except Exception as e:
         logger.exception("Lỗi hệ thống khi chạy phân tích RAG+LLM: %s", e)

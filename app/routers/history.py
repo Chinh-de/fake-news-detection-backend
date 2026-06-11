@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from typing import Optional
 from app.database import get_db
-from app.models.prediction import PredictionRecord
+from app.models.prediction import PredictionRecord, XGBoostPrediction
 from app.schemas.history import HistoryPaginated, HistoryListItem
 from app.schemas.prediction import AnalyzeResponse
 from app.core.security import get_current_admin
@@ -24,7 +24,7 @@ async def get_history_list(
     """
     offset = (page - 1) * limit
     
-    # Base query
+    # Base query for count
     query = select(PredictionRecord)
     
     # Filter by is_trained
@@ -37,13 +37,21 @@ async def get_history_list(
     count_stmt = select(func.count()).select_from(query.subquery())
     total_records = (await db.execute(count_stmt)).scalar() or 0
     
-    # Get items sorted by latest
-    query = query.order_by(desc(PredictionRecord.created_at)).offset(offset).limit(limit)
-    res = await db.execute(query)
-    records = res.scalars().all()
+    # Join query for paginated results
+    join_query = select(PredictionRecord, XGBoostPrediction).outerjoin(
+        XGBoostPrediction, XGBoostPrediction.prediction_record_id == PredictionRecord.id
+    )
+    if is_trained == "true":
+        join_query = join_query.where(PredictionRecord.is_trained == True)
+    elif is_trained == "false":
+        join_query = join_query.where(PredictionRecord.is_trained == False)
+        
+    join_query = join_query.order_by(desc(PredictionRecord.created_at)).offset(offset).limit(limit)
+    res = await db.execute(join_query)
+    rows = res.all()
     
     items = []
-    for r in records:
+    for r, xgb in rows:
         # Create text snippet (first 120 chars)
         snippet = r.post_text[:120] + "..." if len(r.post_text) > 120 else r.post_text
         
@@ -56,7 +64,9 @@ async def get_history_list(
                 slm_confidence=r.slm_confidence,
                 llm_label=r.llm_label,
                 is_trained=r.is_trained,
-                created_at=r.created_at
+                created_at=r.created_at,
+                xgboost_label=xgb.xgboost_label if xgb else None,
+                xgboost_confidence=xgb.xgboost_confidence if xgb else None
             )
         )
         
@@ -82,15 +92,19 @@ async def get_history_detail(
     Hiển thị đầy đủ thông tin bao gồm nội dung, nguồn, kết quả SLM, RAG Wikipedia, Internet, prompt và LLM.
     Yêu cầu quyền Admin.
     """
-    stmt = select(PredictionRecord).where(PredictionRecord.id == record_id)
+    stmt = select(PredictionRecord, XGBoostPrediction).outerjoin(
+        XGBoostPrediction, XGBoostPrediction.prediction_record_id == PredictionRecord.id
+    ).where(PredictionRecord.id == record_id)
     res = await db.execute(stmt)
-    record = res.scalars().first()
+    row = res.first()
     
-    if not record:
+    if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Không tìm thấy bản ghi lịch sử với ID {record_id}"
         )
+        
+    record, xgb = row
         
     rag_evidence_formatted = []
     if record.rag_evidence:
@@ -125,7 +139,9 @@ async def get_history_detail(
         rag_evidence=rag_evidence_formatted,
         fewshot_examples=fewshot_formatted,
         final_prompt=record.final_prompt,
-        created_at=record.created_at
+        created_at=record.created_at,
+        xgboost_label=xgb.xgboost_label if xgb else None,
+        xgboost_confidence=xgb.xgboost_confidence if xgb else None
     )
 
 

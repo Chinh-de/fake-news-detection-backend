@@ -13,6 +13,8 @@ class PredictResponse(BaseModel):
     slm_label: int = Field(..., description="Dự đoán của SLM: 0=Thật, 1=Giả")
     slm_confidence: float = Field(..., description="Độ tự tin của SLM (0.0 -> 1.0)")
     status: str = Field(..., description="Trạng thái phân tích chuyên sâu (e.g. 'pending_analysis' hoặc 'completed')")
+    xgboost_label: Optional[int] = Field(None, description="Dự đoán của XGBoost: 0=Thật, 1=Giả")
+    xgboost_confidence: Optional[float] = Field(None, description="Độ tự tin của XGBoost (0.5 -> 1.0)")
 
 class AnalyzeRequest(BaseModel):
     text: str = Field(..., description="Nội dung bài viết cần phân tích")
@@ -46,3 +48,6 @@ class AnalyzeResponse(BaseModel):
     fewshot_examples: Optional[List[FewshotDemo]] = None
     final_prompt: Optional[str] = None
     created_at: datetime
+    xgboost_label: Optional[int] = None
+    xgboost_confidence: Optional[float] = None
+

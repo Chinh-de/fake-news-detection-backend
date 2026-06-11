@@ -26,6 +26,14 @@ __pycache__/
 *.pyo
 *.pyd
 
+model/embeddings
+
+model/added_tokens.json
+model/bpe.codes
+model/config.json
+model/tokenizer_config.json
+model/vocab.txt
+
 # Virtual environments
 .venv/
 venv/
@@ -51,7 +59,7 @@ logs/
 *.sqlite3
 *.db
 
-model/*
+
 
 # Editor / OS files
 .DS_Store

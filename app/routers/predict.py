@@ -27,7 +27,9 @@ async def predict_news(request: PredictRequest, db: AsyncSession = Depends(get_d
             fb_post_id=record.fb_post_id,
             slm_label=record.slm_label,
             slm_confidence=record.slm_confidence,
-            status=status_msg
+            status=status_msg,
+            xgboost_label=getattr(record, "xgboost_label", None),
+            xgboost_confidence=getattr(record, "xgboost_confidence", None)
         )
     except Exception as e:
         raise HTTPException(
