@@ -23,3 +23,7 @@ pyjwt>=2.8.0
 passlib[bcrypt]>=1.7.4
 google-genai>=0.1.1
 underthesea>=6.0.0
+xgboost
+scikit-learn
+joblib
+
