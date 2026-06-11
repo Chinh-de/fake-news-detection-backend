@@ -310,7 +310,7 @@ class RetrievalService:
     async def search_trusted_articles(self, query: str, max_urls: int = 10) -> list[dict]:
         """Tìm kiếm trusted domains, thử xen kẽ yahoo -> bing -> yahoo -> bing."""
         site_filter = " OR ".join([f"site:{d}" for d in TRUST_DOMAINS])
-        full_query = f"{query} ({site_filter})".strip()
+        full_query = f"({site_filter}) {query}".strip()
         logger.warning("Trusted search full query: %s", full_query)
 
         backends = ["yahoo", "brave", "bing", "auto"]
@@ -480,9 +480,28 @@ class RetrievalService:
         Search trusted sites using both LLM query and clean sliced input query in parallel,
         scrape articles, chunk them, embed them, and perform semantic search.
         """
+        MAX_LEN = 265
+
         loop = asyncio.get_event_loop()
-        # Clean input query: slice to max 300 chars
-        cleaned_input_query = post_normalized_text[:300].strip()
+        # Clean input query: slice to max 265 chars
+
+        text = cleaned_input_query.strip()
+
+        if len(text) <= MAX_LEN:
+            full_query = text
+        else:
+            # cắt trong giới hạn rồi lùi về khoảng trắng gần nhất
+            cut = text[:MAX_LEN]
+
+            last_space = cut.rfind(" ")
+
+            # nếu không có space (case hiếm) thì fallback hard cut
+            if last_space == -1:
+                full_query = cut
+            else:
+                full_query = cut[:last_space]
+
+        cleaned_input_query = full_query.strip()
         
         logger.warning("Running parallel trusted search. Query 1 (LLM): '%s', Query 2 (Clean Input): '%s'", query_text, cleaned_input_query)
         

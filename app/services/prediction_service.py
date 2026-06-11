@@ -67,7 +67,19 @@ class PredictionService:
             res = await db.execute(stmt)
             record = res.scalars().first()
             
-        if record and record.llm_label != -1:
+        cache_expired = False
+        if record and record.created_at:
+            if record.created_at.tzinfo is not None:
+                from datetime import timezone
+                now = datetime.now(timezone.utc)
+            else:
+                now = datetime.utcnow()
+            age_seconds = (now - record.created_at).total_seconds()
+            if age_seconds > 30 * 60:
+                cache_expired = True
+                logger.info("LLM cache for record ID %d has expired (age: %.1f minutes)", record.id, age_seconds / 60)
+            
+        if record and record.llm_label != -1 and not cache_expired:
             # Record already exists and has been analyzed by LLM.
             # Keep original LLM results, only update SLM prediction.
             record.post_text = text_input
@@ -192,7 +204,7 @@ class PredictionService:
         llm_label, llm_explanation = llm_service.parse_llm_json_response(llm_raw)
             
         if record:
-            # We are completing a pending analysis record
+            # We are completing a pending or expired analysis record
             record.post_text = text_input
             record.normalized_text = normalized
             record.slm_label = slm_label
@@ -206,9 +218,17 @@ class PredictionService:
             record.final_prompt = final_user_prompt
             if fb_post_created_at:
                 record.fb_post_created_at = fb_post_created_at
+            
+            # Refresh created_at to start a new 30-minute cache window
+            if record.created_at and record.created_at.tzinfo is not None:
+                from datetime import timezone
+                record.created_at = datetime.now(timezone.utc)
+            else:
+                record.created_at = datetime.utcnow()
+                
             await db.commit()
             await db.refresh(record)
-            logger.info("Completed pending LLM analysis for record ID %d", record.id)
+            logger.info("Completed pending/expired LLM analysis for record ID %d", record.id)
         else:
             # Create a completely new record with full analysis
             record = PredictionRecord(
