@@ -3,8 +3,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.schemas.prediction import AnalyzeRequest, AnalyzeResponse
 from app.services.prediction_service import prediction_service
+import logging
 
 router = APIRouter(prefix="/analyze", tags=["analysis"])
+logger = logging.getLogger("analyze_router")
 
 @router.post("", response_model=AnalyzeResponse, status_code=status.HTTP_200_OK)
 async def analyze_news(request: AnalyzeRequest, db: AsyncSession = Depends(get_db)):
@@ -18,7 +20,8 @@ async def analyze_news(request: AnalyzeRequest, db: AsyncSession = Depends(get_d
             db=db,
             text_input=request.text,
             fb_post_id=request.fb_post_id,
-            fb_post_created_at=request.fb_post_created_at
+            fb_post_created_at=request.fb_post_created_at,
+            record_id=request.record_id
         )
         
         # Format the RAG evidence chunks and few-shot examples to match the response schema
@@ -55,9 +58,12 @@ async def analyze_news(request: AnalyzeRequest, db: AsyncSession = Depends(get_d
             rag_evidence=rag_evidence_formatted,
             fewshot_examples=fewshot_formatted,
             final_prompt=record.final_prompt,
-            created_at=record.created_at
+            created_at=record.created_at,
+            xgboost_label=getattr(record, "xgboost_label", None),
+            xgboost_confidence=getattr(record, "xgboost_confidence", None)
         )
     except Exception as e:
+        logger.exception("Lỗi hệ thống khi chạy phân tích RAG+LLM: %s", e)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Lỗi hệ thống khi chạy phân tích RAG+LLM: {str(e)}"

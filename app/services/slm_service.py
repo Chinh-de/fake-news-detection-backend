@@ -220,6 +220,13 @@ class SLMService:
             
         cleaned_text = preprocess_text(text)
         
+        # Word segmentation using underthesea
+        try:
+            from underthesea import word_tokenize
+            cleaneed_text = word_tokenize(cleaned_text, format="text")
+        except Exception as e:
+            logger.error("Failed to tokenize text using underthesea: %s", e)
+        
         # Tokenize
         inputs = self.tokenizer(
             cleaned_text,

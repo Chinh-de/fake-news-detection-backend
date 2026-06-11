@@ -45,8 +45,8 @@ def clean_text_transformer(text: str) -> str:
     # 3. Loại bỏ mention
     text = re.sub(MENTION_PATTERN, "", text)
 
-    # 4. Xử lý hashtag: giữ phần từ, bỏ #
-    text = re.sub(HASHTAG_PATTERN, r'\1', text)
+    # 4. Xử lý hashtag
+    text = re.sub(HASHTAG_PATTERN, "", text)
 
     # 5. Loại bỏ URL, tag, HTML
     text = re.sub(URL_PATTERN, "", text)

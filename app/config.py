@@ -1,9 +1,15 @@
 import os
 from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, model_validator
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BACKEND_DIR = os.path.dirname(BASE_DIR)
 
 class Settings(BaseSettings):
+    # Production Mode
+    PRODUCTION: bool = Field(default=False)
+
     # Database
     DATABASE_URL: str = Field(default="postgresql+asyncpg://postgres:postgrespassword@localhost:5432/fake_news_detection")
     DATABASE_SYNC_URL: str = Field(default="postgresql://postgres:postgrespassword@localhost:5432/fake_news_detection")
@@ -16,12 +22,12 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: str = Field(default="")
 
     # SLM
-    SLM_MODEL_PATH: str = Field(default="d:\\Study_space\\Ki8\\PBL7\\cuoi ki\\PBL\\Fake-news-detection\\Backend\\model")
+    SLM_MODEL_PATH: str = Field(default=os.path.join(BACKEND_DIR, "model"))
     SLM_REPO_ID: str = Field(default="chinhde/fake-news-detection-slm")
     HF_TOKEN: str = Field(default="")
 
     # Embedding Model
-    EMBEDDING_MODEL_CACHE_DIR: str = Field(default="d:\\Study_space\\Ki8\\PBL7\\cuoi ki\\PBL\\Fake-news-detection\\Backend\\model\\embeddings")
+    EMBEDDING_MODEL_CACHE_DIR: str = Field(default=os.path.join(BACKEND_DIR, "model", "embeddings"))
 
     # CORS
     CORS_ORIGINS: str = Field(default="http://localhost:3000,http://localhost:5173,chrome-extension://*")
@@ -32,13 +38,28 @@ class Settings(BaseSettings):
     ADMIN_PASSWORD: str = Field(default="adminpassword")
 
     # Seeding
-    SEED_CORPUS_CSV: str = Field(default="d:\\Study_space\\Ki8\\PBL7\\cuoi ki\\PBL\\dataset\\train.csv")
+    SEED_CORPUS_CSV: str = Field(default=os.path.join(BASE_DIR, "seed_data", "vifactcheck_all.csv"))
     # Logging
     ENABLE_ANALYSIS_LOG: bool = Field(default=False)
     LOG_LEVEL: str = Field(default="INFO")
 
+    @model_validator(mode="after")
+    def configure_production_paths(self) -> "Settings":
+        is_prod = self.PRODUCTION or os.environ.get("production", "").lower() == "true" or os.environ.get("PRODUCTION", "").lower() == "true"
+        if is_prod:
+            self.PRODUCTION = True
+            # Override paths to /tmp in production to avoid permission denied errors in environments like HF Spaces
+            self.SLM_MODEL_PATH = "/tmp/model"
+            self.EMBEDDING_MODEL_CACHE_DIR = "/tmp/model/embeddings"
+            
+            # Set HF and Torch cache directories to /tmp to prevent Permission Denied errors
+            os.environ["HF_HOME"] = "/tmp/hf_cache"
+            os.environ["TRANSFORMERS_CACHE"] = "/tmp/hf_cache/transformers"
+            os.environ["TORCH_HOME"] = "/tmp/torch_cache"
+        return self
+
     model_config = SettingsConfigDict(
-        env_file=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
+        env_file=os.path.join(BACKEND_DIR, ".env"),
         env_file_encoding="utf-8",
         extra="ignore"
     )

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text, Boolean, DateTime, Index, JSON
+from sqlalchemy import Column, Integer, String, Float, Text, Boolean, DateTime, Index, JSON, ForeignKey
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -23,6 +23,7 @@ class PredictionRecord(Base):
     final_prompt = Column(Text, nullable=True)         # The final prompt sent to the LLM
     
     is_trained = Column(Boolean, default=False, nullable=False)
+    hf_commit = Column(String, nullable=True)
     
     fb_post_created_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
@@ -47,3 +48,20 @@ Index(
     postgresql_using="gin",
     postgresql_ops={"text": "gin_trgm_ops"}
 )
+
+
+class XGBoostPrediction(Base):
+    __tablename__ = "xgboost_predictions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    prediction_record_id = Column(
+        Integer,
+        ForeignKey("prediction_records.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True
+    )
+    xgboost_label = Column(Integer, nullable=False)
+    xgboost_confidence = Column(Float, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+

@@ -6,6 +6,7 @@ from app.services.prediction_service import prediction_service
 from app.services.dashboard_service import dashboard_service
 from app.services.corpus_service import corpus_service
 from app.services.auth_service import auth_service
+from app.services.xgboost_service import xgboost_service
 
 __all__ = [
     "clean_text_transformer",
@@ -16,5 +17,7 @@ __all__ = [
     "prediction_service",
     "dashboard_service",
     "corpus_service",
-    "auth_service"
+    "auth_service",
+    "xgboost_service"
 ]
+

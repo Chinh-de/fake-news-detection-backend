@@ -13,11 +13,14 @@ class PredictResponse(BaseModel):
     slm_label: int = Field(..., description="Dự đoán của SLM: 0=Thật, 1=Giả")
     slm_confidence: float = Field(..., description="Độ tự tin của SLM (0.0 -> 1.0)")
     status: str = Field(..., description="Trạng thái phân tích chuyên sâu (e.g. 'pending_analysis' hoặc 'completed')")
+    xgboost_label: Optional[int] = Field(None, description="Dự đoán của XGBoost: 0=Thật, 1=Giả")
+    xgboost_confidence: Optional[float] = Field(None, description="Độ tự tin của XGBoost (0.5 -> 1.0)")
 
 class AnalyzeRequest(BaseModel):
     text: str = Field(..., description="Nội dung bài viết cần phân tích")
     fb_post_id: Optional[str] = Field(None, description="ID bài viết trên Facebook (nếu có)")
     fb_post_created_at: Optional[datetime] = Field(None, description="Thời gian đăng bài viết (nếu có)")
+    record_id: Optional[int] = Field(None, description="ID bản ghi đã tạo từ bước dự đoán nhanh (nếu có)")
 
 class ChunkEvidence(BaseModel):
     score: float
@@ -45,3 +48,6 @@ class AnalyzeResponse(BaseModel):
     fewshot_examples: Optional[List[FewshotDemo]] = None
     final_prompt: Optional[str] = None
     created_at: datetime
+    xgboost_label: Optional[int] = None
+    xgboost_confidence: Optional[float] = None
+

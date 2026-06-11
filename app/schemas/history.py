@@ -11,6 +11,8 @@ class HistoryListItem(BaseModel):
     llm_label: int
     is_trained: bool
     created_at: datetime
+    xgboost_label: Optional[int] = None
+    xgboost_confidence: Optional[float] = None
 
 class HistoryPaginated(BaseModel):
     items: List[HistoryListItem]
